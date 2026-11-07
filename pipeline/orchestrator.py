@@ -160,6 +160,7 @@ class PipelineState:
         self.video_clips = []  # List of generated clip metadata
         # Separate, backward-compatible state for the continuous full-recap mode.
         self.full_recap_panel_context = []
+        self.full_recap_panels = []
         self.full_recap_script = ""
         self.full_recap_visual_cues = []
         self.full_recap_audio_path = None
@@ -512,6 +513,7 @@ class PipelineState:
         self.video_path = data.get('video_path')
         self.video_clips = data.get('video_clips', [])
         self.full_recap_panel_context = data.get('full_recap_panel_context', [])
+        self.full_recap_panels = data.get('full_recap_panels', [])
         self.full_recap_script = data.get('full_recap_script', "")
         self.full_recap_visual_cues = data.get('full_recap_visual_cues', [])
         self.full_recap_audio_path = data.get('full_recap_audio_path')
@@ -593,6 +595,7 @@ class PipelineState:
             'video_path': self.video_path,
             'video_clips': self.video_clips,
             'full_recap_panel_context': self.full_recap_panel_context,
+            'full_recap_panels': self.full_recap_panels,
             'full_recap_script': self.full_recap_script,
             'full_recap_visual_cues': self.full_recap_visual_cues,
             'full_recap_audio_path': self.full_recap_audio_path,
@@ -629,7 +632,21 @@ class PipelineState:
                 'manhwa_name': self.manhwa_name,
                 'chapter_list': self.chapter_list,
                 'is_batch': self.is_batch,
-                'updated_at': self.updated_at
+                'updated_at': self.updated_at,
+                # Full Recap is a project-level episode that can span chapters.
+                'full_recap_panel_context': self.full_recap_panel_context,
+                'full_recap_panels': self.full_recap_panels,
+                'full_recap_script': self.full_recap_script,
+                'full_recap_visual_cues': self.full_recap_visual_cues,
+                'full_recap_audio_path': self.full_recap_audio_path,
+                'full_recap_word_timestamps': self.full_recap_word_timestamps,
+                'full_recap_timeline': self.full_recap_timeline,
+                'full_recap_video_path': self.full_recap_video_path,
+                'full_recap_status': self.full_recap_status,
+                'full_recap_titles': self.full_recap_titles,
+                'full_recap_selected_title': self.full_recap_selected_title,
+                'full_recap_thumbnails': self.full_recap_thumbnails,
+                'full_recap_package_status': self.full_recap_package_status
             }
             os.makedirs(os.path.dirname(master_state_file), exist_ok=True)
             with open(master_state_file, 'w', encoding='utf-8') as f:
@@ -784,6 +801,32 @@ class PipelineState:
                         state.switch_to_chapter(viewing)
                 except Exception as e:
                     print(f"[PipelineState.load] Master state re-check failed: {e}")
+
+        # Restore project-level Full Recap artefacts from the batch master state.
+        # They belong to the whole episode, not to whichever chapter the user last viewed.
+        if state.is_batch and len(state.chapter_list) > 1:
+            master_state_file = os.path.join(
+                config.MANHWA_DOWNLOAD_DIR, state.manhwa_name, '.batch_state.json'
+            )
+            try:
+                with open(master_state_file, 'r', encoding='utf-8') as f:
+                    master_data = json.load(f)
+                shared_fields = (
+                    'full_recap_panel_context', 'full_recap_panels',
+                    'full_recap_script', 'full_recap_visual_cues',
+                    'full_recap_audio_path', 'full_recap_word_timestamps',
+                    'full_recap_timeline', 'full_recap_video_path',
+                    'full_recap_status', 'full_recap_titles',
+                    'full_recap_selected_title', 'full_recap_thumbnails',
+                    'full_recap_package_status',
+                )
+                for field in shared_fields:
+                    if field in master_data:
+                        setattr(state, field, master_data[field])
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                print(f"[PipelineState.load] Could not restore Full Recap master data: {e}")
 
         # Auto-repair: if saved stage is stale/lower than what's on disk, fix it.
         # NOTE: only UPGRADE here. The narrated two-stage flow legitimately
