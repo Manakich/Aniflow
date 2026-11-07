@@ -2173,7 +2173,11 @@ def sort_clips():
 @app.route('/api/voices', methods=['GET'])
 def get_voices():
     try:
-        return jsonify(get_available_voices())
+        language = (request.args.get('language') or 'en').strip().lower()
+        # Only allow a short locale prefix; the legacy no-query behavior stays English.
+        if not re.fullmatch(r'[a-z]{2,3}', language):
+            return jsonify({'error': 'Invalid language filter'}), 400
+        return jsonify(get_available_voices(language_filter=language))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
