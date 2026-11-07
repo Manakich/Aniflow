@@ -1083,7 +1083,7 @@ function renderStitchStep() {
   actions.innerHTML = `
     <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
     <div class="step-actions-right">
-      <button class="btn" style="background:var(--amber); color:#fff; font-weight:700;" onclick="runFullBatchForProject(APP.projectName)" title="Run every remaining step on ALL chapters automatically">🚀 Run Full Batch</button>
+${APP.mode !== 'full_recap' ? '<button class="btn" style="background:var(--amber); color:#fff; font-weight:700;" onclick="runFullBatchForProject(APP.projectName)" title="Run every remaining step on ALL chapters automatically">🚀 Run Full Batch</button>' : ''}
       <button class="btn btn-secondary" onclick="runStitch()" id="btnStitch">Stitch Pages</button>
       <button class="btn btn-secondary" onclick="runDetect()" id="btnDetect" disabled>${isNarrated ? 'Detect 1 — Bubble Panels' : 'Detect Panels'}</button>
       <button class="btn btn-secondary" onclick="removeOverlappingBoxes()" id="btnRemoveOverlaps" style="display:none" title="Auto-fix overlapping boxes">🔧 Fix Overlaps</button>
@@ -3268,6 +3268,307 @@ function renderNarrationPreview(panels) {
 }
 
 // ─── Step: TTS ──────────────────────────────────────────
+
+let FULL_RECAP_DATA = null;
+
+async function loadFullRecapData() {
+  if (!APP.projectName) return null;
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось загрузить данные Full Recap");
+    FULL_RECAP_DATA = data;
+    return data;
+  } catch (error) {
+    console.error("[FullRecap] Load failed:", error);
+    return null;
+  }
+}
+
+async function startFullRecapStep(step, settings = {}) {
+  if (isPipelineBusy()) return;
+  setRunning(true, "Full Recap: " + step);
+  try {
+    if (Object.keys(settings).length) {
+      await fetch(`/api/projects/${encodeURIComponent(APP.projectName)}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+    }
+    const response = await fetch(`/api/run/step/${step}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_name: APP.projectName, settings }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось запустить этап");
+    toast("Этап запущен. Прогресс отображается в приложении.", "info");
+  } catch (error) {
+    setRunning(false);
+    toast("Full Recap: " + error.message, "error");
+  }
+}
+
+function renderFullRecapScriptPreview() {
+  const el = document.getElementById("fullRecapScriptPreview");
+  if (!el) return;
+  const text = FULL_RECAP_DATA?.script || "";
+  el.value = text;
+  const meta = document.getElementById("fullRecapScriptMeta");
+  if (meta) {
+    meta.textContent = text
+      ? `${text.length.toLocaleString("ru-RU")} символов · ${FULL_RECAP_DATA?.visual_cues?.length || 0} смысловых визуальных отрезков`
+      : "Сценарий ещё не создан.";
+  }
+}
+
+function renderFullRecapScriptStep() {
+  const body = document.getElementById("stepBody");
+  body.innerHTML = `
+    <div class="settings-panel" style="margin-bottom:16px;">
+      <div class="settings-panel-title">🧠 Параметры сценария</div>
+      <div class="form-group">
+        <label class="form-label">Текстовая модель (Ollama / 9router)</label>
+        <input class="form-input" id="fullRecapTextModel" value="qwen2.5:14b" placeholder="qwen2.5:14b или ID модели 9router">
+        <div class="text-xs text-dim mt-1">Модель получает описание всех подготовленных панелей и пишет один связный русский пересказ.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Стиль пересказа</label>
+        <textarea class="form-input" id="fullRecapStyle" rows="3">Динамичный, живой, разговорный русский пересказ для YouTube. Сильное повествование, понятные переходы между событиями, без канцелярита и повторов.</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Дополнительный контекст истории (необязательно)</label>
+        <textarea class="form-input" id="fullRecapStoryContext" rows="2" placeholder="Предыстория, правильные имена персонажей, термины и важные детали..."></textarea>
+      </div>
+    </div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">📜 Полный сценарий</div>
+      <textarea id="fullRecapScriptPreview" class="form-input" rows="12" readonly placeholder="После генерации здесь появится цельный сценарий..."></textarea>
+      <div id="fullRecapScriptMeta" class="text-xs text-dim mt-2">Сценарий ещё не создан.</div>
+    </div>`;
+
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+    <div class="step-actions-right">
+      <button class="btn btn-secondary" onclick="runFullRecapScript()">✍️ Сгенерировать единый сценарий</button>
+      <button class="btn btn-primary" onclick="nextStep()">Проверить сценарий →</button>
+    </div>`;
+
+  loadFullRecapData().then(data => {
+    if (data) {
+      const model = document.getElementById("fullRecapTextModel");
+      const style = document.getElementById("fullRecapStyle");
+      if (model && data.settings?.full_recap_text_model) model.value = data.settings.full_recap_text_model;
+      if (style && data.settings?.full_recap_style) style.value = data.settings.full_recap_style;
+      renderFullRecapScriptPreview();
+    }
+  });
+}
+
+async function runFullRecapScript() {
+  const settings = {
+    pipeline_mode: "full_recap",
+    full_recap_text_model: document.getElementById("fullRecapTextModel")?.value.trim() || "qwen2.5:14b",
+    full_recap_style: document.getElementById("fullRecapStyle")?.value.trim() || "",
+    full_recap_story_context: document.getElementById("fullRecapStoryContext")?.value.trim() || "",
+  };
+  await startFullRecapStep("full_recap_script", settings);
+}
+
+function renderFullRecapReviewStep() {
+  const body = document.getElementById("stepBody");
+  body.innerHTML = `
+    <p class="text-sm text-dim mb-2">Здесь редактируется весь сценарий целиком. Именно этот текст будет одним запросом отправлен в выбранный TTS-сервис.</p>
+    <div class="settings-panel">
+      <div class="settings-panel-title">📝 Единый текст озвучки</div>
+      <textarea id="fullRecapScriptEditor" class="form-input" rows="20" placeholder="Загружаю сценарий..."></textarea>
+      <div id="fullRecapEditMeta" class="text-xs text-dim mt-2"></div>
+    </div>
+    <div class="text-xs text-dim mt-2">Важно: после ручного изменения текста прежняя карта привязки кадров сбрасывается. Перед монтажом таймлайн будет построен заново по текущему сценарию и доступным изображениям.</div>`;
+
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+    <div class="step-actions-right">
+      <button class="btn btn-secondary" onclick="saveFullRecapScript()">💾 Сохранить изменения</button>
+      <button class="btn btn-primary" onclick="nextStep()">К озвучке →</button>
+    </div>`;
+
+  loadFullRecapData().then(data => {
+    const editor = document.getElementById("fullRecapScriptEditor");
+    if (editor) editor.value = data?.script || "";
+    const meta = document.getElementById("fullRecapEditMeta");
+    if (meta) meta.textContent = data?.script ? `${data.script.length.toLocaleString("ru-RU")} символов` : "Сценарий пока не создан.";
+  });
+}
+
+async function saveFullRecapScript() {
+  const fullText = document.getElementById("fullRecapScriptEditor")?.value.trim() || "";
+  if (!fullText) return toast("Сценарий пустой.", "error");
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/script`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ full_text: fullText }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось сохранить сценарий");
+    await loadFullRecapData();
+    toast("Полный сценарий сохранён. Озвучка и таймлайн сброшены для обновлённого текста.", "success");
+  } catch (error) {
+    toast("Ошибка сохранения: " + error.message, "error");
+  }
+}
+
+function renderFullRecapTimelinePreview() {
+  const el = document.getElementById("fullTimelinePreview");
+  if (!el) return;
+  const timeline = FULL_RECAP_DATA?.timeline;
+  if (!timeline?.entries?.length) {
+    el.innerHTML = '<div class="text-sm text-dim">Таймлайн ещё не построен.</div>';
+    return;
+  }
+  const avg = timeline.entries.reduce((sum, entry) => sum + Number(entry.confidence || 0), 0) / timeline.entries.length;
+  el.innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">🎞️ Визуальный таймлайн готов</div>
+      <div class="text-sm">${timeline.entries.length} визуальных отрезков · ${Number(timeline.audio_duration || 0).toFixed(1)} сек. · средняя уверенность привязки ${Math.round(avg * 100)}%</div>
+      <div class="text-xs text-dim mt-1">Озвучка остаётся одной непрерывной дорожкой. Во время пауз предыдущий кадр сохраняется на экране.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:6px;margin-top:12px;">
+        ${timeline.entries.slice(0,36).map((entry,index)=>`<div style="padding:7px;background:var(--bg-secondary);border-radius:6px;font-size:11px;">#${esc(String(entry.panel_id))}<br><span class="text-dim">${Number(entry.start).toFixed(1)}–${Number(entry.end).toFixed(1)}с</span></div>`).join("")}
+      </div>
+      ${timeline.entries.length > 36 ? `<div class="text-xs text-dim mt-2">Показаны первые 36 из ${timeline.entries.length} отрезков.</div>` : ""}
+    </div>`;
+}
+
+function renderFullRecapTimelineStep() {
+  document.getElementById("stepBody").innerHTML = `
+    <p class="text-sm text-dim mb-2">После генерации одной полной озвучки приложение сопоставит текст речи с её временными метками и выберет кадры для смысловых фрагментов. Это нужно только для монтажа — аудио не режется и не изменяется.</p>
+    <div id="fullTimelinePreview" class="mt-2"></div>
+    <div class="progress-container hidden" id="fullTimelineProgress">
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="fullTimelineProgressBar"></div></div>
+      <div class="progress-label"><span id="fullTimelineProgressMsg">Синхронизация...</span><span class="pct" id="fullTimelineProgressPct">0%</span></div>
+    </div>`;
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+    <div class="step-actions-right">
+      <button class="btn btn-secondary" onclick="runFullRecapTimeline()">⏱️ Построить визуальный таймлайн</button>
+      <button class="btn btn-primary" onclick="nextStep()">К экспорту →</button>
+    </div>`;
+  loadFullRecapData().then(data => { if (data) renderFullRecapTimelinePreview(); });
+}
+
+async function runFullRecapTimeline() {
+  await startFullRecapStep("full_recap_timeline");
+}
+
+function renderFullRecapVideoPreview() {
+  const el = document.getElementById("fullRecapVideoPreview");
+  if (!el || !FULL_RECAP_DATA?.video_path) return;
+  el.innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">✅ Готовый ролик</div>
+      <video controls preload="metadata" style="width:100%;max-height:520px;background:#000;border-radius:8px;" src="/api/full-recap/${encodeURIComponent(APP.projectName)}/video"></video>
+      <a class="btn btn-primary" style="display:inline-block;margin-top:12px;text-decoration:none;" href="/api/full-recap/${encodeURIComponent(APP.projectName)}/video" download>Скачать MP4</a>
+    </div>`;
+}
+
+function renderFullRecapVideoStep() {
+  document.getElementById("stepBody").innerHTML = `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Разрешение (YouTube 16:9)</label>
+        <select id="fullRecapResolution" class="form-select">
+          <option value="1080p_landscape" selected>1920 × 1080</option>
+          <option value="2k_landscape">2560 × 1440</option>
+          <option value="4k_landscape">3840 × 2160</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Движение изображений</label>
+        <select id="fullRecapAnimation" class="form-select">
+          <option value="auto" selected>Автоматически менять плавные эффекты</option>
+          <option value="zoom_in">Медленное приближение</option>
+          <option value="zoom_out">Медленное отдаление</option>
+          <option value="slide_left">Плавное движение влево</option>
+          <option value="slide_right">Плавное движение вправо</option>
+          <option value="none">Без движения</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Фоновая музыка (необязательно)</label>
+      <input id="fullRecapBgmPath" class="form-input" placeholder="Путь к аудиофайлу или имя файла из assets/bgm">
+      <div class="text-xs text-dim mt-1">Музыка автоматически зацикливается при необходимости и звучит тише диктора.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Громкость фоновой музыки</label>
+      <input id="fullRecapBgmVolume" type="range" min="0" max="0.35" step="0.01" value="0.12">
+    </div>
+    <div id="fullRecapVideoPreview" class="mt-2"></div>
+    <div class="progress-container hidden" id="fullVideoProgress">
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="fullVideoProgressBar"></div></div>
+      <div class="progress-label"><span id="fullVideoProgressMsg">Рендеринг...</span><span class="pct" id="fullVideoProgressPct">0%</span></div>
+    </div>`;
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+    <div class="step-actions-right">
+      <button class="btn btn-primary" onclick="runFullRecapVideo()">🎬 Создать готовое видео</button>
+    </div>`;
+  loadFullRecapData().then(data => {
+    if (!data) return;
+    if (data.video_path) renderFullRecapVideoPreview();
+    const settings = data.settings || {};
+    const resolution = document.getElementById("fullRecapResolution");
+    const animation = document.getElementById("fullRecapAnimation");
+    if (resolution && settings.video_resolution) resolution.value = settings.video_resolution;
+    if (animation && settings.animation_style) animation.value = settings.animation_style;
+  });
+}
+
+async function runFullRecapVideo() {
+  const settings = {
+    pipeline_mode: "full_recap",
+    video_resolution: document.getElementById("fullRecapResolution")?.value || "1080p_landscape",
+    animation_style: document.getElementById("fullRecapAnimation")?.value || "auto",
+    bgm_path: document.getElementById("fullRecapBgmPath")?.value.trim() || "",
+    bgm_volume: parseFloat(document.getElementById("fullRecapBgmVolume")?.value || "0.12"),
+  };
+  await startFullRecapStep("full_recap_video", settings);
+}
+
+async function runFullRecapAudio() {
+  setRunning(true, "Генерация единой озвучки...");
+  showProgress("tts");
+  const engine = document.getElementById("ttsEngine")?.value || "edge";
+  const settings = {
+    pipeline_mode: "full_recap",
+    tts_engine: engine,
+    tts_voice: document.getElementById("ttsVoice")?.value || "",
+  };
+  if (engine === "edge") {
+    settings.tts_rate = document.getElementById("ttsRate")?.value || "-5%";
+    settings.tts_pitch = document.getElementById("ttsPitch")?.value || "-2Hz";
+  } else if (engine === "kokoro") {
+    settings.tts_speed = parseFloat(document.getElementById("kokoroSpeed")?.value || "1.0");
+  }
+  try {
+    await fetch(`/api/projects/${encodeURIComponent(APP.projectName)}/settings`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    });
+    const response = await fetch("/api/run/step/full_recap_audio", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_name: APP.projectName, settings }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось запустить озвучку");
+  } catch (error) {
+    setRunning(false);
+    toast("Ошибка генерации озвучки: " + error.message, "error");
+  }
+}
+
 function renderTTSStep() {
   const textField = APP.mode === 'dialogue' ? 'text' : 'narration';
   body = document.getElementById('stepBody');
@@ -3275,7 +3576,7 @@ function renderTTSStep() {
     <div id="chapterNavSlot">${renderChapterNavigation()}</div>
     
     <p class="text-sm text-dim mb-2">
-      Convert ${APP.mode === 'dialogue' ? 'extracted dialogue' : 'narration'} text to speech audio.
+      ${APP.mode === 'full_recap' ? 'Generate one complete audio file from the entire reviewed Russian script.' : `Convert ${APP.mode === 'dialogue' ? 'extracted dialogue' : 'narration'} text to speech audio.`}
     </p>
     
     <!-- TTS Engine Selection -->
@@ -3371,12 +3672,16 @@ function renderTTSStep() {
   actions.innerHTML = `
     <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
     <div class="step-actions-right">
-      <button class="btn btn-secondary" onclick="runTTS()" id="btnTTS">🔊 Generate Audio</button>
+      <button class="btn btn-secondary" onclick="runTTS()" id="btnTTS">${APP.mode === 'full_recap' ? '🔊 Generate One Full Voice Track' : '🔊 Generate Audio'}</button>
       <button class="btn btn-primary" onclick="nextStep()" id="btnTTSNext">Continue →</button>
     </div>`;
 
   // Initialize: Load voices and set up engine
-  loadVoicesForEngine('edge');
+  const initialEngine = APP.mode === 'full_recap'
+    ? ((APP.projectData?.settings?.tts_engine) || 'edge') : 'edge';
+  const engineSelect = document.getElementById('ttsEngine');
+  if (engineSelect) engineSelect.value = initialEngine;
+  loadVoicesForEngine(initialEngine, APP.mode === 'full_recap' ? 'ru' : 'en');
 }
 
 async function handleTTSEngineChange() {
@@ -3407,10 +3712,10 @@ async function handleTTSEngineChange() {
   }
 
   // Load voices for the selected engine
-  await loadVoicesForEngine(engine);
+  await loadVoicesForEngine(engine, APP.mode === 'full_recap' ? 'ru' : 'en');
 }
 
-async function loadVoicesForEngine(engine) {
+async function loadVoicesForEngine(engine, language = (APP.mode === 'full_recap' ? 'ru' : 'en')) {
   const voiceSelect = document.getElementById('ttsVoice');
   const btnPreview = document.getElementById('btnPreview');
   
@@ -3432,7 +3737,7 @@ async function loadVoicesForEngine(engine) {
       }
     } else {
       // Load all voices and filter by engine
-      const response = await fetch('/api/voices');
+      const response = await fetch(`/api/voices?language=${encodeURIComponent(language || 'en')}`);
       voices = await response.json();
       voices = voices.filter(v => v.engine === engine);
     }
