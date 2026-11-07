@@ -2816,6 +2816,7 @@ class Orchestrator:
                 rate=s.get('tts_rate'),
                 pitch=s.get('tts_pitch'),
                 speed=float(s.get('tts_speed', 1.0)),
+                elevenlabs_model=s.get('elevenlabs_model', 'eleven_multilingual_v2'),
             )
             state.full_recap_audio_path = result['audio_path']
             state.full_recap_word_timestamps = []
