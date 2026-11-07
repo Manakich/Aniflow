@@ -161,6 +161,7 @@ class PipelineState:
         # Separate, backward-compatible state for the continuous full-recap mode.
         self.full_recap_panel_context = []
         self.full_recap_panels = []
+        self.full_recap_workspace_dir = None
         self.full_recap_script = ""
         self.full_recap_visual_cues = []
         self.full_recap_audio_path = None
@@ -514,6 +515,7 @@ class PipelineState:
         self.video_clips = data.get('video_clips', [])
         self.full_recap_panel_context = data.get('full_recap_panel_context', [])
         self.full_recap_panels = data.get('full_recap_panels', [])
+        self.full_recap_workspace_dir = data.get('full_recap_workspace_dir')
         self.full_recap_script = data.get('full_recap_script', "")
         self.full_recap_visual_cues = data.get('full_recap_visual_cues', [])
         self.full_recap_audio_path = data.get('full_recap_audio_path')
@@ -596,6 +598,7 @@ class PipelineState:
             'video_clips': self.video_clips,
             'full_recap_panel_context': self.full_recap_panel_context,
             'full_recap_panels': self.full_recap_panels,
+            'full_recap_workspace_dir': self.full_recap_workspace_dir,
             'full_recap_script': self.full_recap_script,
             'full_recap_visual_cues': self.full_recap_visual_cues,
             'full_recap_audio_path': self.full_recap_audio_path,
@@ -636,6 +639,7 @@ class PipelineState:
                 # Full Recap is a project-level episode that can span chapters.
                 'full_recap_panel_context': self.full_recap_panel_context,
                 'full_recap_panels': self.full_recap_panels,
+                'full_recap_workspace_dir': self.full_recap_workspace_dir,
                 'full_recap_script': self.full_recap_script,
                 'full_recap_visual_cues': self.full_recap_visual_cues,
                 'full_recap_audio_path': self.full_recap_audio_path,
@@ -813,7 +817,7 @@ class PipelineState:
                     master_data = json.load(f)
                 shared_fields = (
                     'full_recap_panel_context', 'full_recap_panels',
-                    'full_recap_script', 'full_recap_visual_cues',
+                    'full_recap_workspace_dir', 'full_recap_script', 'full_recap_visual_cues',
                     'full_recap_audio_path', 'full_recap_word_timestamps',
                     'full_recap_timeline', 'full_recap_video_path',
                     'full_recap_status', 'full_recap_titles',
@@ -2882,6 +2886,7 @@ class Orchestrator:
                 story_context=s.get('full_recap_story_context', ''),
             )
             state.full_recap_panels = all_panels
+            state.full_recap_workspace_dir = state.project_dir
             state.full_recap_panel_context = context
             state.full_recap_script = result['full_text']
             state.full_recap_visual_cues = result['visual_cues']
@@ -2931,8 +2936,10 @@ class Orchestrator:
         try:
             from pipeline.full_recap_audio import generate_full_narration_audio
             s = state.settings
-            os.makedirs(state.audio_dir, exist_ok=True)
-            audio_path = os.path.join(state.audio_dir, "full_recap_narration.mp3")
+            workspace = state.full_recap_workspace_dir or state.project_dir
+            audio_dir = os.path.join(workspace, "full_recap", "audio")
+            os.makedirs(audio_dir, exist_ok=True)
+            audio_path = os.path.join(audio_dir, "full_recap_narration.mp3")
             self._emit_progress('full_recap_audio', 0, 1, "Генерация единой озвучки…")
             result = generate_full_narration_audio(
                 state.full_recap_script,
@@ -2987,15 +2994,9 @@ class Orchestrator:
             audio_duration = float(_get_audio_duration(state.full_recap_audio_path))
             if audio_duration <= 0:
                 raise ValueError("Не удалось определить длительность озвучки")
-            filtered_ids = [
-                panel.get('panel_id')
-                for scene in state.full_recap_panel_context
-                if scene.get('scene_id') != 'filter_summary'
-                for panel in scene.get('panels', [])
+            panel_ids = [
+                panel.get('panel_id') for panel in (state.full_recap_panels or state.panels)
                 if panel.get('panel_id') is not None
-            ]
-            panel_ids = filtered_ids or [
-                p.get('panel_id') for p in state.panels if p.get('panel_id') is not None
             ]
             timeline = build_visual_timeline(
                 state.full_recap_script,
@@ -3025,7 +3026,8 @@ class Orchestrator:
         try:
             from pipeline.full_recap_renderer import render_full_recap_video
             s = state.settings
-            output_dir = os.path.join(config.VIDEO_OUTPUT_DIR, state.project_name)
+            workspace = state.full_recap_workspace_dir or state.project_dir
+            output_dir = os.path.join(workspace, "full_recap", "output")
             os.makedirs(output_dir, exist_ok=True)
             output_path = os.path.join(output_dir, "full_recap.mp4")
             self._emit_progress('full_recap_video', 0, 1, "Монтаж видео под единую озвучку…")
@@ -3036,7 +3038,7 @@ class Orchestrator:
             if bgm_path and not os.path.isabs(bgm_path):
                 bgm_path = os.path.join(config.BGM_DIR, bgm_path)
             render_full_recap_video(
-                state.panels,
+                state.full_recap_panels or state.panels,
                 state.full_recap_timeline,
                 state.full_recap_audio_path,
                 output_path,
@@ -3114,10 +3116,10 @@ class Orchestrator:
                 'OPENAI_IMAGE_MODEL', 'gpt-image-2.5-sunburst'
             )
             thumbnails = generate_thumbnail_variants(
-                state.project_dir,
+                state.full_recap_workspace_dir or state.project_dir,
                 state.full_recap_script,
                 state.full_recap_panel_context,
-                state.panels,
+                state.full_recap_panels or state.panels,
                 state.full_recap_titles,
                 model=image_model,
                 base_url=os.getenv('OPENAI_API_BASE_URL', 'https://api.openai.com/v1'),
