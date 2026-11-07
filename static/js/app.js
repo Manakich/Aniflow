@@ -3831,9 +3831,10 @@ function renderFullRecapPackageStep() {
 }
 
 async function runFullRecapPackage() {
+  const packageData = await loadFullRecapPackageData();
   const titleText = document.getElementById("fullRecapTitleReferenceText")?.value.trim() || "";
-  const titleRefs = FULL_RECAP_PACKAGE_DATA?.title_references || [];
-  const thumbnailRefs = FULL_RECAP_PACKAGE_DATA?.thumbnail_references || [];
+  const titleRefs = packageData?.title_references || [];
+  const thumbnailRefs = packageData?.thumbnail_references || [];
   if (!titleRefs.length && !titleText) {
     return toast("Для названий добавь скриншот референса или примеры текстом.", "warning");
   }
