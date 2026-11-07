@@ -467,7 +467,9 @@ def serve_full_recap_panel(project_name, panel_id):
     image_path = panel.get('path') if panel else None
     if not image_path or not os.path.isfile(image_path):
         return jsonify({'error': 'Full Recap panel image not found'}), 404
-    return send_file(image_path, mimetype='image/jpeg', conditional=True)
+    import mimetypes
+    mime_type = mimetypes.guess_type(image_path)[0] or 'application/octet-stream'
+    return send_file(image_path, mimetype=mime_type, conditional=True)
 
 
 @app.route('/api/full-recap/<project_name>/video', methods=['GET'])
