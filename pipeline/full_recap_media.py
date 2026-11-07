@@ -79,6 +79,21 @@ def list_reference_files(project_dir: str, kind: str) -> list[dict[str, str]]:
     ]
 
 
+def clear_reference_files(project_dir: str, kind: str) -> int:
+    """Remove the current project's reference set so the next video can use a new one."""
+    if kind not in {"thumbnails", "titles"}:
+        raise ValueError("Неизвестный тип референсов")
+    folder = Path(project_dir) / "full_recap" / "references" / kind
+    if not folder.is_dir():
+        return 0
+    removed = 0
+    for item in folder.iterdir():
+        if item.is_file() and item.suffix.lower() in ALLOWED_IMAGE_EXTENSIONS:
+            item.unlink()
+            removed += 1
+    return removed
+
+
 def _image_as_data_url(path: str, max_side: int = 1280) -> str:
     with Image.open(path) as source:
         image = source.convert("RGB")
