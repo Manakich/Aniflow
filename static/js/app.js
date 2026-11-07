@@ -3711,25 +3711,54 @@ async function runFullRecapPackage() {
 }
 
 async function runFullRecapAudio() {
+  const engine = document.getElementById("ttsEngine")?.value || "edge";
+  let fullText = "";
+  try {
+    const scriptResponse = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}`);
+    const recapData = await scriptResponse.json();
+    if (!scriptResponse.ok) throw new Error(recapData.error || "Не удалось загрузить сценарий");
+    fullText = (recapData.script || "").trim();
+    if (!fullText) throw new Error("Сначала сгенерируйте и сохраните полный сценарий.");
+
+    if (engine === "elevenlabs") {
+      const model = document.getElementById("fullRecapElevenModel")?.value || "eleven_flash_v2_5";
+      const maxChars = model === "eleven_flash_v2_5" ? 40000 : 10000;
+      if (fullText.length > maxChars) {
+        throw new Error(
+          `Сценарий содержит ${fullText.length.toLocaleString("ru-RU")} символов. ${model} принимает максимум ${maxChars.toLocaleString("ru-RU")} за один запрос. Текст не будет автоматически разделён.`
+        );
+      }
+    }
+  } catch (error) {
+    toast("Озвучка не запущена: " + error.message, "error");
+    return;
+  }
+
   setRunning(true, "Генерация единой озвучки...");
   showProgress("tts");
-  const engine = document.getElementById("ttsEngine")?.value || "edge";
   const settings = {
     pipeline_mode: "full_recap",
     tts_engine: engine,
     tts_voice: document.getElementById("ttsVoice")?.value || "",
   };
-  if (engine === "edge") {
+  if (engine === "elevenlabs") {
+    settings.full_recap_elevenlabs_model =
+      document.getElementById("fullRecapElevenModel")?.value || "eleven_flash_v2_5";
+  } else if (engine === "edge") {
     settings.tts_rate = document.getElementById("ttsRate")?.value || "-5%";
     settings.tts_pitch = document.getElementById("ttsPitch")?.value || "-2Hz";
   } else if (engine === "kokoro") {
     settings.tts_speed = parseFloat(document.getElementById("kokoroSpeed")?.value || "1.0");
   }
   try {
-    await fetch(`/api/projects/${encodeURIComponent(APP.projectName)}/settings`, {
+    const settingsResponse = await fetch(`/api/projects/${encodeURIComponent(APP.projectName)}/settings`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     });
+    if (!settingsResponse.ok) {
+      const failure = await settingsResponse.json();
+      throw new Error(failure.error || "Не удалось сохранить настройки голоса");
+    }
     const response = await fetch("/api/run/step/full_recap_audio", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ project_name: APP.projectName, settings }),
@@ -3775,6 +3804,18 @@ function renderTTSStep() {
         </div>
       </div>
       <div id="elevenLabsKeyStatus" class="text-sm" style="margin-top: 8px;"></div>
+    </div>
+
+    <!-- Full Recap ElevenLabs long-form single-request model selection -->
+    <div id="fullRecapElevenModelSection" class="hidden" style="margin-bottom:16px;padding:16px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);">
+      <div class="form-group">
+        <label class="form-label">Модель для единой русской озвучки</label>
+        <select class="form-select" id="fullRecapElevenModel">
+          <option value="eleven_flash_v2_5" selected>Flash v2.5 — до 40 000 символов за один запрос</option>
+          <option value="eleven_multilingual_v2">Multilingual v2 — до 10 000 символов за один запрос</option>
+        </select>
+      </div>
+      <div class="text-xs text-dim">Один запрос — один готовый аудиофайл. Если сценарий превышает лимит модели, приложение остановится с предупреждением. Текст автоматически на части не делится.</div>
     </div>
 
     <!-- Voice Selection -->
@@ -3854,12 +3895,24 @@ function renderTTSStep() {
     ? ((APP.projectData?.settings?.tts_engine) || 'edge') : 'edge';
   const engineSelect = document.getElementById('ttsEngine');
   if (engineSelect) engineSelect.value = initialEngine;
-  loadVoicesForEngine(initialEngine, APP.mode === 'full_recap' ? 'ru' : 'en');
+  const fullRecapModel = document.getElementById('fullRecapElevenModel');
+  if (fullRecapModel && APP.projectData?.settings?.full_recap_elevenlabs_model) {
+    fullRecapModel.value = APP.projectData.settings.full_recap_elevenlabs_model;
+  }
+  handleTTSEngineChange();
 }
 
 async function handleTTSEngineChange() {
   const engine = document.getElementById('ttsEngine').value;
   
+  // Show the long-form model selector only for Full Recap + ElevenLabs.
+  const fullRecapModelSection = document.getElementById('fullRecapElevenModelSection');
+  if (fullRecapModelSection) {
+    fullRecapModelSection.classList.toggle(
+      'hidden', !(APP.mode === 'full_recap' && engine === 'elevenlabs')
+    );
+  }
+
   // Show/hide ElevenLabs API key section
   const keySection = document.getElementById('elevenLabsKeySection');
   if (engine === 'elevenlabs') {
