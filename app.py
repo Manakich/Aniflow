@@ -359,6 +359,10 @@ def get_full_recap_package(project_name):
             'title_references': [
                 item['filename'] for item in list_reference_files(state.project_dir, 'titles')
             ],
+            'settings': {
+                'openai_image_model': state.settings.get('openai_image_model', ''),
+                'full_recap_title_reference_text': state.settings.get('full_recap_title_reference_text', ''),
+            },
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
