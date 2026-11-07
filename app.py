@@ -4,6 +4,13 @@ Full-featured Flask app with all pipeline controls.
 """
 import os, json, threading, shutil, re, sys
 
+# Load local API keys without ever committing them to the repository.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+except ImportError:
+    pass
+
 # Line-buffer stdout/stderr so redirected logs (server.log) update live
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -298,6 +305,10 @@ def get_full_recap(project_name):
         'audio_path': state.full_recap_audio_path,
         'timeline': state.full_recap_timeline,
         'video_path': state.full_recap_video_path,
+        'titles': state.full_recap_titles,
+        'selected_title': state.full_recap_selected_title,
+        'thumbnails': state.full_recap_thumbnails,
+        'package_status': state.full_recap_package_status,
         'panel_count': len(state.panels),
         'settings': {
             'tts_engine': state.settings.get('tts_engine', 'edge'),
@@ -306,6 +317,94 @@ def get_full_recap(project_name):
             'full_recap_style': state.settings.get('full_recap_style', ''),
         },
     })
+
+
+@app.route('/api/full-recap/<project_name>/references/<kind>', methods=['POST'])
+def upload_full_recap_references(project_name, kind):
+    """Upload separate visual-style or title-style reference screenshots."""
+    if kind not in ('thumbnails', 'titles'):
+        return jsonify({'error': 'Reference type must be thumbnails or titles'}), 400
+    try:
+        from pipeline.full_recap_media import save_reference_uploads
+        state = PipelineState.load(project_name)
+        uploads = request.files.getlist('files')
+        if not uploads:
+            return jsonify({'error': 'Выберите хотя бы один файл'}), 400
+        saved = save_reference_uploads(state.project_dir, kind, uploads)
+        state.full_recap_package_status = 'references_updated'
+        state.save()
+        return jsonify({
+            'status': 'uploaded',
+            'kind': kind,
+            'files': [{'filename': item['filename'], 'name': item['name']} for item in saved],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/full-recap/<project_name>/package', methods=['GET'])
+def get_full_recap_package(project_name):
+    """Return generated metadata and uploaded reference filenames."""
+    try:
+        from pipeline.full_recap_media import list_reference_files
+        state = PipelineState.load(project_name)
+        return jsonify({
+            'status': state.full_recap_package_status,
+            'titles': state.full_recap_titles,
+            'selected_title': state.full_recap_selected_title,
+            'thumbnails': state.full_recap_thumbnails,
+            'thumbnail_references': [
+                item['filename'] for item in list_reference_files(state.project_dir, 'thumbnails')
+            ],
+            'title_references': [
+                item['filename'] for item in list_reference_files(state.project_dir, 'titles')
+            ],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/full-recap/<project_name>/package/selection', methods=['PUT'])
+def select_full_recap_title(project_name):
+    data = request.get_json(silent=True) or {}
+    selected = data.get('index')
+    state = PipelineState.load(project_name)
+    try:
+        selected = int(selected)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Номер варианта должен быть числом'}), 400
+    if selected < 0 or selected >= len(state.full_recap_titles):
+        return jsonify({'error': 'Такого варианта названия нет'}), 400
+    state.full_recap_selected_title = state.full_recap_titles[selected]
+    state.save()
+    return jsonify({'status': 'selected', 'title': state.full_recap_selected_title})
+
+
+@app.route('/api/full-recap/<project_name>/references/<kind>/<filename>', methods=['GET'])
+def serve_full_recap_reference(project_name, kind, filename):
+    from pipeline.full_recap_media import ALLOWED_IMAGE_EXTENSIONS
+    if kind not in ('thumbnails', 'titles'):
+        return jsonify({'error': 'Unknown reference kind'}), 404
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or os.path.splitext(safe_name)[1].lower() not in ALLOWED_IMAGE_EXTENSIONS:
+        return jsonify({'error': 'Invalid filename'}), 400
+    state = PipelineState.load(project_name)
+    folder = os.path.join(state.project_dir, 'full_recap', 'references', kind)
+    if not os.path.isfile(os.path.join(folder, safe_name)):
+        return jsonify({'error': 'Reference not found'}), 404
+    return send_from_directory(folder, safe_name)
+
+
+@app.route('/api/full-recap/<project_name>/thumbnails/<filename>', methods=['GET'])
+def serve_full_recap_thumbnail(project_name, filename):
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or not safe_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        return jsonify({'error': 'Invalid filename'}), 400
+    state = PipelineState.load(project_name)
+    folder = os.path.join(state.project_dir, 'full_recap', 'thumbnails')
+    if not os.path.isfile(os.path.join(folder, safe_name)):
+        return jsonify({'error': 'Thumbnail not found'}), 404
+    return send_from_directory(folder, safe_name)
 
 
 @app.route('/api/full-recap/<project_name>/video', methods=['GET'])
@@ -542,6 +641,7 @@ def run_step(step_name):
         'full_recap_audio': lambda: _run_with_settings(orchestrator.step_full_recap_audio, project_name, data),
         'full_recap_timeline': lambda: _run_with_settings(orchestrator.step_full_recap_timeline, project_name, data),
         'full_recap_video': lambda: _run_with_settings(orchestrator.step_full_recap_video, project_name, data),
+        'full_recap_package': lambda: _run_with_settings(orchestrator.step_full_recap_package, project_name, data),
     }
     if step_name not in step_map:
         return jsonify({'error': f'Unknown step: {step_name}'}), 400
