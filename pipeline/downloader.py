@@ -181,7 +181,9 @@ def load_from_archive_file(archive_path: str, output_dir: str) -> list[str]:
             return output
     except zipfile.BadZipFile as exc:
         raise ValueError("Файл не является корректным ZIP/CBZ-архивом.") from exc
-\n\ndef validate_images(image_paths: list[str]) -> list[str]:
+
+
+def validate_images(image_paths: list[str]) -> list[str]:
     """Validate that all image files are readable and return valid ones."""
     valid = []
     for path in image_paths:
