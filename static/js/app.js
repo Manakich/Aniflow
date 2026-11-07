@@ -54,6 +54,19 @@ const NARRATED_STEPS = [
   { id: 'sort_clips',   label: 'Sort Clips',    title: 'Sort & Organize Clips',       subtitle: 'Organize clips from multiple chapters into folders' },
 ];
 
+const FULL_RECAP_STEPS = [
+  { id: 'source', label: 'Source', title: 'Select Manga Source', subtitle: 'Use a chapter URL or a local folder of source pages' },
+  { id: 'cast', label: 'Cast', title: 'Character Names (Optional)', subtitle: 'Import character names to improve story continuity' },
+  { id: 'stitch', label: 'Panels', title: 'Detect & Prepare Art Panels', subtitle: 'Create clean art panels in reading order' },
+  { id: 'review', label: 'Review', title: 'Review Extracted Panels', subtitle: 'Remove empty backgrounds, duplicates and unwanted panels' },
+  { id: 'extract_text', label: 'Text', title: 'Extract Dialogue', subtitle: 'Read speech bubbles to give the storyteller context' },
+  { id: 'full_script', label: 'Script', title: 'Generate One Complete Russian Script', subtitle: 'Create one connected story, not narration per frame' },
+  { id: 'full_review', label: 'Edit', title: 'Review the Complete Script', subtitle: 'Edit the full narration before sending it to TTS' },
+  { id: 'tts', label: 'Voice', title: 'Generate One Complete Voice Track', subtitle: 'Choose a voice and synthesize the entire text in one request' },
+  { id: 'full_timeline', label: 'Sync', title: 'Match Images to the Voice Track', subtitle: 'Use speech timestamps to arrange panels under the continuous audio' },
+  { id: 'full_video', label: 'Export', title: 'Render the Complete Video', subtitle: 'Create one continuous MP4 with subtle motion and optional music' },
+];
+
 // ─── Init ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   checkStatus();
@@ -233,7 +246,9 @@ function resumeProject(name) {
 // ─── Mode Selection ──────────────────────────────────────
 function selectMode(mode) {
   APP.mode = mode;
-  APP.steps = mode === 'dialogue' ? DIALOGUE_STEPS : NARRATED_STEPS;
+  APP.steps = mode === 'dialogue'
+    ? DIALOGUE_STEPS
+    : (mode === 'full_recap' ? FULL_RECAP_STEPS : NARRATED_STEPS);
   APP.currentStep = 0;
   APP.projectName = '';
   APP.sourceFolder = '';
@@ -290,7 +305,11 @@ function renderStepContent() {
     'review2': renderReview2Step,
     'clean': renderCleanStep,
     'narrate': renderNarrateStep,
+    'full_script': renderFullRecapScriptStep,
+    'full_review': renderFullRecapReviewStep,
     'tts': renderTTSStep,
+    'full_timeline': renderFullRecapTimelineStep,
+    'full_video': renderFullRecapVideoStep,
     'video': renderVideoStep,
     'review_clips': renderReviewClipsStep,
     'sort_clips': renderSortClipsStep,
@@ -1059,7 +1078,7 @@ function renderStitchStep() {
 
     <div id="stitchBoxCount" class="text-xs text-dim mt-1"></div>`;
 
-  const isNarrated = APP.mode === 'narrated';
+  const isNarrated = APP.mode === 'narrated' || APP.mode === 'full_recap';
   const actions = document.getElementById('stepActions');
   actions.innerHTML = `
     <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
@@ -1492,8 +1511,9 @@ function _batchStepsForMode() {
 
 function openWizardAtStep(projectName, stepId) {
   // Open the pipeline wizard on a specific step (used after full batch → Review Clips)
-  if (APP.mode !== 'dialogue' && APP.mode !== 'narrated') APP.mode = 'dialogue';
-  APP.steps = APP.mode === 'narrated' ? NARRATED_STEPS : DIALOGUE_STEPS;
+  if (APP.mode !== 'dialogue' && APP.mode !== 'narrated' && APP.mode !== 'full_recap') APP.mode = 'dialogue';
+  APP.steps = APP.mode === 'full_recap' ? FULL_RECAP_STEPS
+    : (APP.mode === 'narrated' ? NARRATED_STEPS : DIALOGUE_STEPS);
   APP.projectName = projectName;
   document.getElementById('viewHome').classList.add('hidden');
   document.getElementById('viewWizard').classList.remove('hidden');
@@ -1911,7 +1931,7 @@ async function loadPanelReview() {
   // Narrated mode reviews the CLEAN art panels (Crop 2); dialogue mode
   // reviews the bubble panels (Crop 1). Fall back if the preferred list
   // is empty so the step still shows something reviewable.
-  const preferred = APP.mode === 'narrated'
+  const preferred = (APP.mode === 'narrated' || APP.mode === 'full_recap')
     ? (panels.length ? panels : pwt)
     : (pwt.length ? pwt : panels);
   const panelList = preferred;
@@ -3609,6 +3629,7 @@ async function checkElevenLabsKeyStatus() {
 }
 
 async function runTTS() {
+  if (APP.mode === 'full_recap') return runFullRecapAudio();
   setRunning(true, 'Generating audio...');
   showProgress('tts');
 
@@ -4204,6 +4225,15 @@ socket.on('step_complete', (data) => {
   // Reload project data
   loadProjectData(APP.projectName);
 
+  if (String(data.step || '').startsWith('full_recap_')) {
+    loadFullRecapData().then(() => {
+      if (data.step === 'full_recap_script') renderFullRecapScriptPreview();
+      if (data.step === 'full_recap_timeline') renderFullRecapTimelinePreview();
+      if (data.step === 'full_recap_video') renderFullRecapVideoPreview();
+    });
+    return;
+  }
+
   // Auto-advance or enable buttons based on step
   const step = data.step;
   if (step === 'load') {
@@ -4219,7 +4249,7 @@ socket.on('step_complete', (data) => {
     // Reload project data to get detection boxes, then refresh overlay
     loadProjectData(APP.projectName).then(() => { loadStitchedPreview(); });
   } else if (step === 'crop1' || step === 'crop') {
-    if (APP.mode === 'narrated') {
+    if (APP.mode === 'narrated' || APP.mode === 'full_recap') {
       enable('btnStitch2');
       toast('Bubble panels cropped! Now run Stitch 2 to combine them.', 'info');
     } else {
@@ -4327,7 +4357,7 @@ function updateProgress(data) {
   const msg = data.message || 'Processing...';
 
   // Try to find the active progress bar
-  const prefixes = ['download', 'stitch', 'extract', 'clean', 'narrate', 'tts', 'video'];
+  const prefixes = ['download', 'stitch', 'extract', 'clean', 'narrate', 'tts', 'video', 'fullRecap', 'fullTimeline', 'fullVideo'];
   for (const p of prefixes) {
     const bar = document.getElementById(`${p}ProgressBar`);
     const msgEl = document.getElementById(`${p}ProgressMsg`);
