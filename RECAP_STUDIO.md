@@ -4,13 +4,14 @@ This development branch adds a separate chapter-level workflow without removing 
 
 ## Product contract
 
-1. Detect and review clean art panels in reading order.
-2. Build visual notes from the source panels.
-3. Generate one continuous Russian recap script with semantic visual cues.
-4. Let the user review and edit that complete script.
-5. Send the complete approved script to the selected TTS provider once.
-6. Use speech timing only to place visuals; never split or re-synthesize narration to fit the pictures.
-7. Render one MP4 whose video track covers the entire narration duration.
+1. Load a source from an existing chapter folder, supported site URL, single image, ZIP/CBZ archive, or PDF.
+2. Detect and review clean art panels in reading order.
+3. Build visual notes from the source panels.
+4. Generate one continuous Russian recap script with semantic visual cues.
+5. Let the user review and edit that complete script.
+6. Send the complete approved script to the selected TTS provider once.
+7. Use speech timing only to place visuals; never split or re-synthesize narration to fit the pictures.
+8. Render one MP4 whose video track covers the entire narration duration.
 
 ## New modules
 
@@ -41,6 +42,13 @@ This development branch adds a separate chapter-level workflow without removing 
 4. In the final Full Recap step, upload thumbnail style references and title screenshots for that video, then generate the three options.
 
 The Images API accepts reference images on its edit endpoint. AniFlow supplies the uploaded references together with selected episode panels, requests 1280×720 artwork, and adds the Russian hook text after generation.
+
+## Source files
+
+- Local folders can contain page images.
+- ZIP and CBZ archives are imported without extracting arbitrary paths from the archive.
+- PDF pages are rasterized using PyMuPDF.
+- Install PDF support with `pip install PyMuPDF` or `pip install -r requirements-optional.txt`.
 
 ## Optional dependency
 
