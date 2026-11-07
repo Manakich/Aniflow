@@ -6,7 +6,9 @@ that tells the editor which panels illustrate portions of that script.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 from typing import Any, Callable
 
@@ -18,6 +20,81 @@ SYSTEM_PROMPT_RU = """Ты профессиональный автор русс�
 отдельной подписью. Не используй фразы «на этом кадре», «на следующей картинке» и технические
 комментарии. Не копируй длинные оригинальные реплики дословно. Результат должен быть на русском
 языке и подходить для непрерывной дикторской озвучки."""
+
+
+def _quick_blank_reason(image_path: str) -> str:
+    """Catch only truly blank single-colour pages; preserve story-relevant scenery."""
+    if not image_path or not os.path.isfile(image_path):
+        return ""
+    try:
+        from PIL import Image, ImageStat
+        with Image.open(image_path) as source:
+            image = source.convert("L")
+            image.thumbnail((64, 64), Image.Resampling.LANCZOS)
+            stat = ImageStat.Stat(image)
+            mean = stat.mean[0]
+            deviation = stat.stddev[0]
+            if deviation < 1.0 and (mean > 252 or mean < 3):
+                return "uniform blank background"
+    except Exception:
+        return ""
+    return ""
+
+
+def _extract_recap_panel_note(
+    panel: dict[str, Any],
+    backend: Any,
+    vision_model: str,
+    timeout: int = 180,
+) -> tuple[bool, str, str]:
+    """Return keep flag, grounded description, and optional skip reason."""
+    from pipeline.scene_narrator import _encode_image_small, MAX_IMG_SIDE_ALL
+    import llm_transport
+
+    image_path = panel.get("path", "")
+    if not image_path or not os.path.isfile(image_path):
+        return True, "", "image path unavailable"
+
+    image = _encode_image_small(image_path, MAX_IMG_SIDE_ALL)
+    if not image:
+        return True, "", "image could not be encoded"
+
+    prompt = """Ты фильтруешь панели манги/манхвы для сюжетного YouTube-пересказа.
+
+Сначала реши, полезно ли это изображение для понимания истории.
+
+KEEP — если есть персонаж, действие, эмоция, важный предмет, сюжетный текст,
+значимое место или атмосферный establishing shot, который объясняет сцену.
+Даже если в кадре нет человека, сохрани его, когда локация или событие важны.
+
+SKIP — только если это действительно пустой однотонный фон, декоративный
+разделитель без сюжетного смысла, техническая страница, рекламный/промо-блок,
+логотип/кредиты, водяной знак или изображение, которое не добавляет ничего к истории.
+
+Если сомневаешься — обязательно KEEP. Не отбрасывай важные пейзажи, интерьеры
+или кадры-переходы, если они раскрывают место или атмосферу.
+
+Верни строго одну строку:
+KEEP: краткое фактическое описание изображения
+или
+SKIP: короткая причина
+
+Не выдумывай персонажей и события."""
+    try:
+        raw = llm_transport.as_transport(backend).chat(
+            vision_model, prompt, [image],
+            temperature=0.1, top_p=0.8, max_tokens=220, timeout=timeout,
+        )
+        raw = (raw or "").strip()
+        if re.match(r"^SKIP(?:\\s*:|\\s|$)", raw, flags=re.IGNORECASE):
+            return False, "", raw.split(":", 1)[-1].strip() or "vision model marked as non-story"
+        if raw.upper().startswith("KEEP:"):
+            raw = raw.split(":", 1)[-1].strip()
+        return True, raw, ""
+    except Exception as exc:
+        # An unavailable vision pass must not silently delete story artwork.
+        print(f"[FullRecap] Panel classification failed for {panel.get('panel_id')}: {exc}")
+        return True, "", "vision classification unavailable"
 
 
 def build_panel_context(
@@ -38,12 +115,67 @@ def build_panel_context(
     if not panels:
         raise ValueError("Нет изображений для анализа")
 
-    from pipeline.scene_narrator import group_into_scenes, _extract_visual_beat_for_panel
+    from pipeline.scene_narrator import group_into_scenes
 
-    scenes = group_into_scenes(panels, scene_size=max(1, int(scene_size)))
+    scenes = []
     total = len(panels)
     completed = 0
     contexts: list[dict[str, Any]] = []
+    seen_hashes = set()
+    kept_panels = []
+    skipped = []
+
+    # First pass: exact duplicate and truly blank panel filtering.
+    for panel in panels:
+        if cancel_check and cancel_check():
+            raise InterruptedError("Анализ изображений отменён")
+        image_path = panel.get("path", "")
+        blank_reason = _quick_blank_reason(image_path)
+        if blank_reason:
+            skipped.append({"panel_id": panel.get("panel_id"), "reason": blank_reason})
+            completed += 1
+            if progress_callback:
+                progress_callback(completed, total, f"Пропуск пустого кадра: {completed}/{total}")
+            continue
+        if image_path and os.path.isfile(image_path):
+            try:
+                with open(image_path, "rb") as image_file:
+                    fingerprint = hashlib.sha256(image_file.read()).digest()
+                if fingerprint in seen_hashes:
+                    skipped.append({"panel_id": panel.get("panel_id"), "reason": "exact duplicate"})
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(completed, total, f"Пропуск дубликата: {completed}/{total}")
+                    continue
+                seen_hashes.add(fingerprint)
+            except OSError:
+                pass
+        kept_panels.append(panel)
+
+    # Second pass: vision model marks decorative/non-story pages. If it is unsure,
+    # the panel is kept. Every accepted panel receives a sequential display number.
+    vision_kept = []
+    for panel in kept_panels:
+        if cancel_check and cancel_check():
+            raise InterruptedError("Анализ изображений отменён")
+        keep, note, reason = _extract_recap_panel_note(
+            panel, backend, vision_model, timeout=timeout
+        )
+        if keep:
+            panel_copy = dict(panel)
+            panel_copy["_full_recap_visual_note"] = note
+            vision_kept.append(panel_copy)
+        else:
+            skipped.append({"panel_id": panel.get("panel_id"), "reason": reason})
+        completed += 1
+        if progress_callback:
+            progress_callback(completed, total, f"Анализ и фильтрация изображений: {completed}/{total}")
+
+    if not vision_kept:
+        raise ValueError("После фильтрации не осталось содержательных изображений. Проверьте набор панелей.")
+
+    scenes = group_into_scenes(vision_kept, scene_size=max(1, int(scene_size)))
+    sequence_number = 0
 
     for scene_index, scene_panels in enumerate(scenes, start=1):
         if cancel_check and cancel_check():
@@ -54,25 +186,28 @@ def build_panel_context(
             if cancel_check and cancel_check():
                 raise InterruptedError("Анализ изображений отменён")
 
+            sequence_number += 1
             panel_id = panel.get("panel_id")
-            note = _extract_visual_beat_for_panel(
-                panel, backend, vision_model, timeout=timeout
-            )
             scene_items.append({
                 "panel_id": panel_id,
-                "visual_note": (note or "").strip(),
+                "sequence_number": sequence_number,
+                "visual_note": (panel.get("_full_recap_visual_note") or "").strip(),
                 "dialogue": (panel.get("text") or panel.get("dialogue") or "").strip(),
                 "panel_type": panel.get("panel_type", "standard"),
             })
-            completed += 1
-            if progress_callback:
-                progress_callback(completed, total, f"Анализ изображений: {completed}/{total}")
 
         contexts.append({
             "scene_id": f"scene_{scene_index:03d}",
             "panels": scene_items,
         })
 
+    contexts.append({
+        "scene_id": "filter_summary",
+        "panels": [],
+        "kept_count": sequence_number,
+        "skipped_count": len(skipped),
+        "skipped_panels": skipped,
+    })
     return contexts
 
 
