@@ -3002,7 +3002,10 @@ class Orchestrator:
                     'full_recap_package', c + 1, 6, m
                 ),
             )
-            state.full_recap_thumbnails = thumbnails
+            state.full_recap_thumbnails = [
+                {key: value for key, value in item.items() if key != 'path'}
+                for item in thumbnails
+            ]
             state.full_recap_package_status = "ready"
             state.error = None
             state.save()
