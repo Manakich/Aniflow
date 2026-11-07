@@ -428,6 +428,30 @@ def serve_full_recap_thumbnail(project_name, filename):
     return send_from_directory(folder, safe_name)
 
 
+@app.route('/api/full-recap/<project_name>/audio', methods=['GET'])
+def serve_full_recap_audio(project_name):
+    """Stream the one continuous Full Recap narration file."""
+    state = PipelineState.load(project_name)
+    path = state.full_recap_audio_path
+    if not path or not os.path.isfile(path):
+        return jsonify({'error': 'Full Recap audio has not been generated yet'}), 404
+    return send_file(path, mimetype='audio/mpeg', as_attachment=False)
+
+
+@app.route('/api/full-recap/<project_name>/panels/<path:panel_id>', methods=['GET'])
+def serve_full_recap_panel(project_name, panel_id):
+    """Serve only an image referenced by the current Full Recap project state."""
+    state = PipelineState.load(project_name)
+    panel = next((
+        item for item in (state.full_recap_panels or state.panels)
+        if str(item.get('panel_id')) == str(panel_id)
+    ), None)
+    image_path = panel.get('path') if panel else None
+    if not image_path or not os.path.isfile(image_path):
+        return jsonify({'error': 'Full Recap panel image not found'}), 404
+    return send_file(image_path, mimetype='image/jpeg', conditional=True)
+
+
 @app.route('/api/full-recap/<project_name>/video', methods=['GET'])
 def serve_full_recap_video(project_name):
     """Stream the rendered Full Recap MP4."""
