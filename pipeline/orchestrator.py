@@ -2896,6 +2896,9 @@ class Orchestrator:
             custom_bg = s.get('custom_bg_path', '')
             if custom_bg and not os.path.isabs(custom_bg):
                 custom_bg = os.path.join(config.BACKGROUNDS_DIR, custom_bg)
+            bgm_path = s.get('bgm_path', '')
+            if bgm_path and not os.path.isabs(bgm_path):
+                bgm_path = os.path.join(config.BGM_DIR, bgm_path)
             render_full_recap_video(
                 state.panels,
                 state.full_recap_timeline,
@@ -2908,7 +2911,7 @@ class Orchestrator:
                 custom_bg_path=custom_bg or None,
                 animation_style=s.get('animation_style', 'auto'),
                 watermark_path=s.get('watermark_path') or None,
-                bgm_path=s.get('bgm_path') or None,
+                bgm_path=bgm_path or None,
                 bgm_volume=float(s.get('bgm_volume', config.BGM_VOLUME)),
                 progress_callback=lambda c, t, m: self._emit_progress(
                     'full_recap_video', c, t, m
