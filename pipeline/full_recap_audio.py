@@ -28,7 +28,7 @@ def generate_full_narration_audio(
     rate: str | None = None,
     pitch: str | None = None,
     speed: float = 1.0,
-    elevenlabs_model: str = "eleven_multilingual_v2",
+    elevenlabs_model: str = "eleven_flash_v2_5",
     synthesize_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Send the whole script to the selected TTS engine exactly once.
@@ -58,8 +58,9 @@ def generate_full_narration_audio(
         client = get_elevenlabs_tts()
         if not client.available:
             raise RuntimeError("ElevenLabs API key is not configured")
-        result = client.generate_speech(
-            text, output_path, voice=voice, model=elevenlabs_model
+        result = client.generate_speech_with_timestamps(
+            text, output_path, voice=voice, model=elevenlabs_model,
+            timeout=(30, 3600),
         )
     else:
         from pipeline.tts_engine import generate_speech
