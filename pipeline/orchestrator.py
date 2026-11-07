@@ -2806,7 +2806,7 @@ class Orchestrator:
 
     def step_full_recap_script(self, state):
         """Generate one continuous Russian recap script for one or many chapters."""
-        if not state.panels:
+        if not state.panels and not (state.is_batch and len(state.chapter_list) > 1):
             state.error = "Сначала подготовьте и проверьте изображения (Crop 2)."
             state.save()
             return state
@@ -3088,9 +3088,10 @@ class Orchestrator:
                 pass
             vision_model = getattr(self.narrator, 'vision_model', None) or config.VISION_MODEL
 
-            title_refs = list_reference_files(state.project_dir, "titles")
+            workspace = state.full_recap_workspace_dir or state.project_dir
+            title_refs = list_reference_files(workspace, "titles")
             title_ref_paths = [item["path"] for item in title_refs]
-            thumb_refs = list_reference_files(state.project_dir, "thumbnails")
+            thumb_refs = list_reference_files(workspace, "thumbnails")
             if not thumb_refs:
                 state.error = "Загрузите хотя бы один референс обложки перед генерацией."
                 state.full_recap_package_status = "missing_thumbnail_references"
