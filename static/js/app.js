@@ -3464,6 +3464,58 @@ function renderFullRecapAudioPreview() {
     </div>`;
 }
 
+let FULL_RECAP_TIMELINE_PAGE = 0;
+
+function updateFullRecapTimelinePanel(index, panelId) {
+  if (!FULL_RECAP_DATA?.timeline?.entries?.[index]) return;
+  const candidate = (FULL_RECAP_DATA.panels || []).find(
+    panel => String(panel.panel_id) === String(panelId)
+  );
+  if (!candidate) {
+    toast("Выбери кадр из списка подготовленных изображений.", "warning");
+    return;
+  }
+  FULL_RECAP_DATA.timeline.entries[index].panel_id = candidate.panel_id;
+  const image = document.getElementById(`fullRecapTimelineImage_${index}`);
+  if (image) {
+    image.src = `/api/full-recap/${encodeURIComponent(APP.projectName)}/panels/${encodeURIComponent(String(candidate.panel_id))}`;
+  }
+  const label = document.getElementById(`fullRecapTimelinePanelLabel_${index}`);
+  if (label) label.textContent = `Глава ${candidate.source_chapter || "—"} · кадр ${candidate.sequence_number || "—"} · ID ${candidate.panel_id}`;
+}
+
+async function saveFullRecapTimelineEdits() {
+  const entries = FULL_RECAP_DATA?.timeline?.entries || [];
+  if (!entries.length) return toast("Таймлайн пустой.", "error");
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/timeline`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entries: entries.map(entry => ({ panel_id: entry.panel_id })),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось сохранить визуальные замены");
+    await loadFullRecapData();
+    FULL_RECAP_TIMELINE_PAGE = Math.min(
+      FULL_RECAP_TIMELINE_PAGE,
+      Math.max(0, Math.ceil((FULL_RECAP_DATA?.timeline?.entries?.length || 0) / 24) - 1)
+    );
+    renderFullRecapTimelinePreview();
+    toast(`Сохранено визуальных отрезков: ${data.entries}`.replace("undefined", ""), "success");
+  } catch (error) {
+    toast("Ошибка сохранения таймлайна: " + error.message, "error");
+  }
+}
+
+function changeFullRecapTimelinePage(delta) {
+  const total = FULL_RECAP_DATA?.timeline?.entries?.length || 0;
+  const maxPage = Math.max(0, Math.ceil(total / 24) - 1);
+  FULL_RECAP_TIMELINE_PAGE = Math.max(0, Math.min(maxPage, FULL_RECAP_TIMELINE_PAGE + delta));
+  renderFullRecapTimelinePreview();
+}
+
 function renderFullRecapTimelinePreview() {
   const el = document.getElementById("fullTimelinePreview");
   if (!el) return;
@@ -3473,23 +3525,46 @@ function renderFullRecapTimelinePreview() {
     return;
   }
   const avg = timeline.entries.reduce((sum, entry) => sum + Number(entry.confidence || 0), 0) / timeline.entries.length;
+  const options = (FULL_RECAP_DATA.panels || []).map(panel => {
+    const label = `Глава ${panel.source_chapter || "—"} · кадр ${panel.sequence_number || "—"} · ${panel.panel_id}`;
+    return `<option value="${esc(String(panel.panel_id))}">${esc(label)}</option>`;
+  }).join("");
+  const pageSize = 24;
+  const maxPage = Math.max(0, Math.ceil(timeline.entries.length / pageSize) - 1);
+  FULL_RECAP_TIMELINE_PAGE = Math.min(FULL_RECAP_TIMELINE_PAGE, maxPage);
+  const pageStart = FULL_RECAP_TIMELINE_PAGE * pageSize;
+  const pageEntries = timeline.entries.slice(pageStart, pageStart + pageSize);
+
   el.innerHTML = `
     <div class="settings-panel">
-      <div class="settings-panel-title">🎞️ Визуальный таймлайн готов</div>
+      <div class="settings-panel-title">🎞️ Визуальный таймлайн</div>
       <div class="text-sm">${timeline.entries.length} визуальных отрезков · ${Number(timeline.audio_duration || 0).toFixed(1)} сек. · средняя уверенность привязки ${Math.round(avg * 100)}%</div>
-      <div class="text-xs text-dim mt-1">Озвучка остаётся одной непрерывной дорожкой. Во время пауз предыдущий кадр сохраняется на экране.</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:12px;">
-        ${timeline.entries.slice(0,48).map((entry,index)=>`
-          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
-            <img src="/api/full-recap/${encodeURIComponent(APP.projectName)}/panels/${encodeURIComponent(String(entry.panel_id))}" alt="Кадр ${index+1}" loading="lazy" style="display:block;width:100%;height:112px;object-fit:contain;background:#080808;">
-            <div style="padding:8px;font-size:11px;">
-              <strong>Кадр ${index+1}</strong>
-              <span class="text-dim" style="display:block;">${Number(entry.start).toFixed(1)}–${Number(entry.end).toFixed(1)} сек. · ${Math.round(Number(entry.confidence || 0)*100)}%</span>
-              <span style="display:block;margin-top:5px;line-height:1.35;">${esc(entry.cue_text || "Сюжетный визуальный фрагмент")}</span>
-            </div>
-          </div>`).join("")}
+      <div class="text-xs text-dim mt-1">Озвучка остаётся одной непрерывной дорожкой. Во время пауз предыдущий кадр сохраняется на экране. Можно заменить неверный кадр, не меняя время и аудио.</div>
+      <datalist id="fullRecapPanelOptions">${options}</datalist>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px;">
+        ${pageEntries.map((entry,localIndex)=>{
+          const index = pageStart + localIndex;
+          const panel = (FULL_RECAP_DATA.panels || []).find(p => String(p.panel_id) === String(entry.panel_id)) || {};
+          const currentLabel = `Глава ${panel.source_chapter || "—"} · кадр ${panel.sequence_number || "—"} · ID ${entry.panel_id}`;
+          return `
+            <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+              <img id="fullRecapTimelineImage_${index}" src="/api/full-recap/${encodeURIComponent(APP.projectName)}/panels/${encodeURIComponent(String(entry.panel_id))}" alt="Кадр ${index+1}" loading="lazy" style="display:block;width:100%;height:130px;object-fit:contain;background:#080808;">
+              <div style="padding:8px;font-size:11px;">
+                <strong>Визуальный отрезок ${index+1}</strong>
+                <span class="text-dim" style="display:block;">${Number(entry.start).toFixed(1)}–${Number(entry.end).toFixed(1)} сек. · ${Math.round(Number(entry.confidence || 0)*100)}%</span>
+                <span style="display:block;margin-top:5px;line-height:1.35;min-height:42px;">${esc(entry.cue_text || "Сюжетный визуальный фрагмент")}</span>
+                <span id="fullRecapTimelinePanelLabel_${index}" class="text-xs text-dim" style="display:block;margin-top:6px;">${esc(currentLabel)}</span>
+                <input list="fullRecapPanelOptions" class="form-input" style="font-size:11px;margin-top:6px;" value="${esc(String(entry.panel_id))}" onchange="updateFullRecapTimelinePanel(${index},this.value)" placeholder="Найти другой ID кадра">
+              </div>
+            </div>`;
+        }).join("")}
       </div>
-      ${timeline.entries.length > 48 ? `<div class="text-xs text-dim mt-2">Показаны первые 48 из ${timeline.entries.length} кадров.</div>` : ""}
+      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:14px;flex-wrap:wrap;">
+        <button class="btn btn-ghost" onclick="changeFullRecapTimelinePage(-1)" ${FULL_RECAP_TIMELINE_PAGE===0?"disabled":""}>← Предыдущие</button>
+        <span class="text-xs text-dim">Страница ${FULL_RECAP_TIMELINE_PAGE+1} из ${maxPage+1} · показаны ${pageStart+1}–${Math.min(pageStart+pageSize,timeline.entries.length)} из ${timeline.entries.length}</span>
+        <button class="btn btn-ghost" onclick="changeFullRecapTimelinePage(1)" ${FULL_RECAP_TIMELINE_PAGE>=maxPage?"disabled":""}>Следующие →</button>
+      </div>
+      <button class="btn btn-secondary" style="margin-top:12px;" onclick="saveFullRecapTimelineEdits()">💾 Сохранить замену кадров</button>
     </div>`;
 }
 
