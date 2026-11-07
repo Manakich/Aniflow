@@ -1,1 +1,3 @@
-# Optional CPU/GPU speech alignment fallback for non-Edge TTS engines\nfaster-whisper>=1.0.0\nPyMuPDF>=1.24.0\n
+# Optional CPU/GPU speech alignment fallback and PDF import support
+faster-whisper>=1.0.0
+PyMuPDF>=1.24.0
