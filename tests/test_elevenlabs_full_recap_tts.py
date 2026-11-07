@@ -85,7 +85,7 @@ def test_elevenlabs_full_recap_rejects_over_limit_without_network_request(monkey
         "pipeline.elevenlabs_tts.requests.post",
         lambda *args, **kwargs: calls.append((args, kwargs)),
     )
-    with pytest.raises(RuntimeError, match="40 000"):
+    with pytest.raises(RuntimeError, match="40,000"):
         client.generate_speech_with_timestamps(
             "я" * 40001, str(tmp_path / "too-long.mp3"), voice="voice-123"
         )
