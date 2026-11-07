@@ -313,6 +313,14 @@ def get_full_recap(project_name):
         ],
         'package_status': state.full_recap_package_status,
         'panel_count': len(state.panels),
+        'kept_panel_count': sum(
+            len(scene.get('panels', [])) for scene in state.full_recap_panel_context
+            if scene.get('scene_id') != 'filter_summary'
+        ),
+        'skipped_panel_count': next((
+            scene.get('skipped_count', 0) for scene in state.full_recap_panel_context
+            if scene.get('scene_id') == 'filter_summary'
+        ), 0),
         'settings': {
             'tts_engine': state.settings.get('tts_engine', 'edge'),
             'tts_voice': state.settings.get('tts_voice', ''),
