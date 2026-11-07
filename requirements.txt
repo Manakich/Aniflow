@@ -30,3 +30,7 @@ transformers>=4.45
 einops
 timm
 easyocr>=1.7           # finds speech-bubble text for inpainting
+
+
+# ─── Local .env loading ─────────────────────────────────────────
+python-dotenv>=1.0
