@@ -2815,7 +2815,7 @@ class Orchestrator:
             from pipeline.full_recap import (
                 build_panel_context, generate_full_recap_script, merge_chapter_panels
             )
-            s = state.settings
+            s = dict(state.settings)
             backend = self.narrator.transport
             vision_model = getattr(self.narrator, 'vision_model', None) or config.VISION_MODEL
             text_model = s.get('full_recap_text_model') or getattr(
