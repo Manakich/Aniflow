@@ -64,19 +64,19 @@ Open the local web UI at `http://localhost:8080`.
 - Background music is optional and mixed below narration.
 - Panel filtering is conservative: if the vision classifier is uncertain, the image is kept.
 - Multi-chapter Full Recap assigns chapter-qualified panel IDs to avoid panel ID collisions between chapters.
-- References are stored per project. The final YouTube screen has separate upload and clear controls for thumbnail references and title references.
+- References are stored per project. The final YouTube screen has separate upload and clear controls for thumbnail references and title references. A title screenshot or text examples are required for title generation; at least one thumbnail reference is required for cover generation.
 - The timeline editor only changes panel selection; saved timestamp boundaries and audio remain unchanged.
 - Image generation creates three separate concepts using the episode's selected art panels and uploaded thumbnail references. Russian thumbnail lettering is overlaid after image generation for readable typography.
 - Generated titles use episode content and title-style references. They are not copied literally from the reference screenshots.
 
 ## Current verification
 
-The GitHub Actions workflow checks:
+The GitHub Actions workflow is triggered on each push to the feature branch and checks:
 - Python compilation of the application and pipeline modules.
 - Full Recap unit tests for full-script generation, single-request TTS, timing alignment, panel filtering, ZIP/CBZ import, multi-chapter IDs, thumbnail/title generation and ElevenLabs alignment.
 - JavaScript syntax for the web UI.
 
-Latest checked commit: `9c119efe1dfd330953bcf88d8e66e99eb3f52cf5` — GitHub Actions succeeded.
+Check the pull request's **Checks** tab for the status of the latest branch commit. A green CI run verifies compilation, unit-level behaviour and JS syntax; it does not replace a real local end-to-end episode render.
 
 ## Still required before calling it production-ready
 
