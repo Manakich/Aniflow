@@ -100,3 +100,20 @@ def test_vision_skip_response_is_parsed_and_uncertainty_keeps_panel(monkeypatch,
     )
     assert keep is True
     assert note == "герой входит в комнату"
+
+
+def test_merge_chapter_panels_assigns_unique_ids_and_preserves_source_order():
+    merged = full_recap.merge_chapter_panels([
+        (12, [{"panel_id": 1, "path": "chapter12/panel1.png"},
+              {"panel_id": 2, "path": "chapter12/panel2.png"}]),
+        (13, [{"panel_id": 1, "path": "chapter13/panel1.png"}]),
+    ])
+
+    assert [panel["panel_id"] for panel in merged] == [
+        "ch00012_1", "ch00012_2", "ch00013_1"
+    ]
+    assert [panel["source_chapter"] for panel in merged] == [12, 12, 13]
+    assert [panel["source_panel_id"] for panel in merged] == [1, 2, 1]
+    assert [panel["path"] for panel in merged] == [
+        "chapter12/panel1.png", "chapter12/panel2.png", "chapter13/panel1.png"
+    ]
