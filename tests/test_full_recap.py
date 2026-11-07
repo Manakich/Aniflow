@@ -66,19 +66,19 @@ def test_srt_word_timestamps_are_parsed():
 def test_visual_timeline_can_use_multiple_panels_for_one_phrase():
     text = "Герой вошел в замок и увидел дракона."
     words = [
-        {"word": "Герой", "start": 0.0, "end": 0.8},
-        {"word": "вошел", "start": 0.8, "end": 1.4},
-        {"word": "в", "start": 1.4, "end": 1.6},
-        {"word": "замок", "start": 1.6, "end": 2.3},
-        {"word": "и", "start": 2.3, "end": 2.5},
-        {"word": "увидел", "start": 2.5, "end": 3.2},
-        {"word": "дракона", "start": 3.2, "end": 4.0},
+        {"word": "Герой", "start": 0.0, "end": 1.2},
+        {"word": "вошел", "start": 1.2, "end": 2.5},
+        {"word": "в", "start": 2.5, "end": 2.8},
+        {"word": "замок", "start": 2.8, "end": 4.2},
+        {"word": "и", "start": 4.2, "end": 4.5},
+        {"word": "увидел", "start": 4.5, "end": 6.3},
+        {"word": "дракона", "start": 6.3, "end": 8.0},
     ]
     timeline = build_visual_timeline(
         text,
         [{"text": text, "panel_ids": [1, 2, 3]}],
         words,
-        audio_duration=6.0,
+        audio_duration=9.0,
         fallback_panel_ids=[1, 2, 3],
     )
     entries = timeline["entries"]
@@ -188,3 +188,24 @@ def test_full_script_is_generated_in_one_llm_call_and_panel_ids_are_valid(monkey
     assert len(calls) == 1
     assert result["full_text"] == "Герой открывает дверь. За ней появляется дракон."
     assert result["visual_cues"][1]["panel_ids"] == [2]
+
+
+def test_short_narration_cue_does_not_create_rapid_visual_cuts():
+    text = "Герой внезапно открыл древнюю дверь."
+    words = [
+        {"word": "Герой", "start": 0.0, "end": 0.45},
+        {"word": "внезапно", "start": 0.45, "end": 0.95},
+        {"word": "открыл", "start": 0.95, "end": 1.35},
+        {"word": "древнюю", "start": 1.35, "end": 1.8},
+        {"word": "дверь", "start": 1.8, "end": 2.4},
+    ]
+    timeline = build_visual_timeline(
+        text,
+        [{"text": text, "panel_ids": [1, 2, 3, 4, 5]}],
+        words,
+        audio_duration=3.0,
+        fallback_panel_ids=[1, 2, 3, 4, 5],
+    )
+    assert len(timeline["entries"]) == 1
+    assert timeline["entries"][0]["panel_id"] == 1
+    assert timeline["entries"][0]["end"] == 3.0
