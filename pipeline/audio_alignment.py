@@ -221,6 +221,7 @@ def build_visual_timeline(
                 "start": start + step * index,
                 "end": end if index == len(panel_ids) - 1 else start + step * (index + 1),
                 "confidence": 0.2 if cue.get("fallback") else 0.85,
+                "cue_text": str(cue.get("text") or ""),
             })
 
     if not raw_shots:
@@ -233,6 +234,7 @@ def build_visual_timeline(
             "start": step * index,
             "end": duration if index == len(ids) - 1 else step * (index + 1),
             "confidence": 0.15,
+            "cue_text": "",
         } for index, panel_id in enumerate(ids)]
 
     raw_shots.sort(key=lambda item: (item["start"], item["end"]))
@@ -258,6 +260,7 @@ def build_visual_timeline(
             "end": round(end, 3),
             "motion": motions[len(shots) % len(motions)],
             "confidence": float(item.get("confidence", 0.5)),
+            "cue_text": str(item.get("cue_text") or ""),
         })
         cursor = end
 
@@ -272,6 +275,8 @@ def build_visual_timeline(
             merged[-1]["confidence"] = min(
                 merged[-1]["confidence"], shot["confidence"]
             )
+            if shot.get("cue_text") and shot["cue_text"] not in merged[-1].get("cue_text", ""):
+                merged[-1]["cue_text"] = (merged[-1].get("cue_text", "") + " " + shot["cue_text"]).strip()
         else:
             merged.append(shot)
 
