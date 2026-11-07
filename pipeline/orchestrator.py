@@ -2949,12 +2949,12 @@ class Orchestrator:
                 rate=s.get('tts_rate'),
                 pitch=s.get('tts_pitch'),
                 speed=float(s.get('tts_speed', 1.0)),
-                elevenlabs_model=s.get('elevenlabs_model', 'eleven_multilingual_v2'),
+                elevenlabs_model=s.get('full_recap_elevenlabs_model', 'eleven_flash_v2_5'),
             )
             state.full_recap_audio_path = result['audio_path']
-            state.full_recap_word_timestamps = []
+            state.full_recap_word_timestamps = result.get('word_timestamps') or []
             subtitle_path = result.get('subtitle_path')
-            if subtitle_path and os.path.isfile(subtitle_path):
+            if not state.full_recap_word_timestamps and subtitle_path and os.path.isfile(subtitle_path):
                 from pipeline.audio_alignment import parse_srt_word_timestamps
                 with open(subtitle_path, 'r', encoding='utf-8') as f:
                     state.full_recap_word_timestamps = parse_srt_word_timestamps(f.read())
