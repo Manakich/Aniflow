@@ -86,7 +86,7 @@ SKIP: короткая причина
             temperature=0.1, top_p=0.8, max_tokens=220, timeout=timeout,
         )
         raw = (raw or "").strip()
-        if re.match(r"^SKIP(?:\\s*:|\\s|$)", raw, flags=re.IGNORECASE):
+        if re.match(r"^SKIP(?:\s*:|\s|$)", raw, flags=re.IGNORECASE):
             return False, "", raw.split(":", 1)[-1].strip() or "vision model marked as non-story"
         if raw.upper().startswith("KEEP:"):
             raw = raw.split(":", 1)[-1].strip()
@@ -257,7 +257,8 @@ def generate_full_recap_script(
                 continue
             known_ids[str(panel_id)] = panel_id
             context_lines.append(
-                f"Панель {panel_id}: {panel.get('visual_note') or 'описание отсутствует'}. "
+                f"Кадр №{panel.get('sequence_number', len(known_ids) + 1)} "
+                f"(ID панели {panel_id}): {panel.get('visual_note') or 'описание отсутствует'}. "
                 f"Распознанный текст: {panel.get('dialogue') or 'нет'}."
             )
 
@@ -302,7 +303,8 @@ def generate_full_recap_script(
 - text каждого cue должен быть точным непрерывным фрагментом full_text.
 - panel_ids — одна или несколько панелей, которые действительно иллюстрируют этот фрагмент.
 - Одна панель может оставаться подходящей на протяжении нескольких предложений.
-- Используй только ID из переданного материала.
+- Используй только ID панелей из переданного материала (ID указывается в скобках после номера кадра).
+- Не используй порядковый номер кадра вместо ID панели.
 - Покрой cue весь рассказ по порядку, не создавай лишние короткие отрезки.
 
 Верни только JSON:
