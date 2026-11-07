@@ -312,7 +312,7 @@ def get_full_recap(project_name):
             for item in state.full_recap_thumbnails
         ],
         'package_status': state.full_recap_package_status,
-        'panel_count': len(state.panels),
+        'panel_count': len(state.full_recap_panels or state.panels),
         'kept_panel_count': sum(
             len(scene.get('panels', [])) for scene in state.full_recap_panel_context
             if scene.get('scene_id') != 'filter_summary'
@@ -341,7 +341,7 @@ def upload_full_recap_references(project_name, kind):
         uploads = request.files.getlist('files')
         if not uploads:
             return jsonify({'error': 'Выберите хотя бы один файл'}), 400
-        saved = save_reference_uploads(state.project_dir, kind, uploads)
+        saved = save_reference_uploads(state.full_recap_workspace_dir or state.project_dir, kind, uploads)
         state.full_recap_package_status = 'references_updated'
         state.save()
         return jsonify({
@@ -368,10 +368,10 @@ def get_full_recap_package(project_name):
                 for item in state.full_recap_thumbnails
             ],
             'thumbnail_references': [
-                item['filename'] for item in list_reference_files(state.project_dir, 'thumbnails')
+                item['filename'] for item in list_reference_files(state.full_recap_workspace_dir or state.project_dir, 'thumbnails')
             ],
             'title_references': [
-                item['filename'] for item in list_reference_files(state.project_dir, 'titles')
+                item['filename'] for item in list_reference_files(state.full_recap_workspace_dir or state.project_dir, 'titles')
             ],
             'settings': {
                 'openai_image_model': state.settings.get('openai_image_model', ''),
@@ -407,7 +407,7 @@ def serve_full_recap_reference(project_name, kind, filename):
     if safe_name != filename or os.path.splitext(safe_name)[1].lower() not in ALLOWED_IMAGE_EXTENSIONS:
         return jsonify({'error': 'Invalid filename'}), 400
     state = PipelineState.load(project_name)
-    folder = os.path.join(state.project_dir, 'full_recap', 'references', kind)
+    folder = os.path.join(state.full_recap_workspace_dir or state.project_dir, 'full_recap', 'references', kind)
     if not os.path.isfile(os.path.join(folder, safe_name)):
         return jsonify({'error': 'Reference not found'}), 404
     return send_from_directory(folder, safe_name)
@@ -419,7 +419,7 @@ def serve_full_recap_thumbnail(project_name, filename):
     if safe_name != filename or not safe_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
         return jsonify({'error': 'Invalid filename'}), 400
     state = PipelineState.load(project_name)
-    folder = os.path.join(state.project_dir, 'full_recap', 'thumbnails')
+    folder = os.path.join(state.full_recap_workspace_dir or state.project_dir, 'full_recap', 'thumbnails')
     if not os.path.isfile(os.path.join(folder, safe_name)):
         return jsonify({'error': 'Thumbnail not found'}), 404
     return send_from_directory(folder, safe_name)
