@@ -3800,8 +3800,9 @@ function renderFullRecapPackageStep() {
         <button class="btn btn-secondary" onclick="uploadFullRecapReferences('titles','fullRecapTitleRefs')">Загрузить скриншоты названий</button>
         <button class="btn btn-ghost" onclick="clearFullRecapReferences('titles')">Очистить старые</button>
       </div>
-      <label class="form-label mt-3">Примеры названий текстом (необязательно)</label>
-      <textarea id="fullRecapTitleReferenceText" class="form-input" rows="4" placeholder="Вставь сюда несколько названий, стиль которых нужно повторить."></textarea>
+      <label class="form-label mt-3">Примеры названий текстом</label>
+      <textarea id="fullRecapTitleReferenceText" class="form-input" rows="4" placeholder="Вставь сюда несколько названий, стиль которых нужно использовать как ориентир."></textarea>
+      <div class="text-xs text-dim mt-1">Для генерации обязательно нужен хотя бы один референс названия: скриншоты выше или примеры в этом поле.</div>
     </div>
     <div class="settings-panel">
       <div class="settings-panel-title">⚙️ Генератор изображений</div>
@@ -3830,9 +3831,18 @@ function renderFullRecapPackageStep() {
 }
 
 async function runFullRecapPackage() {
+  const titleText = document.getElementById("fullRecapTitleReferenceText")?.value.trim() || "";
+  const titleRefs = FULL_RECAP_PACKAGE_DATA?.title_references || [];
+  const thumbnailRefs = FULL_RECAP_PACKAGE_DATA?.thumbnail_references || [];
+  if (!titleRefs.length && !titleText) {
+    return toast("Для названий добавь скриншот референса или примеры текстом.", "warning");
+  }
+  if (!thumbnailRefs.length) {
+    return toast("Загрузи хотя бы один референс обложки.", "warning");
+  }
   const settings = {
     pipeline_mode: "full_recap",
-    full_recap_title_reference_text: document.getElementById("fullRecapTitleReferenceText")?.value.trim() || "",
+    full_recap_title_reference_text: titleText,
     openai_image_model: document.getElementById("fullRecapImageModel")?.value || "gpt-image-2.5-sunburst",
   };
   await startFullRecapStep("full_recap_package", settings);
