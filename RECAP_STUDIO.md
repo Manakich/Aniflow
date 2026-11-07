@@ -1,63 +1,89 @@
 # AniFlow Recap Studio — Full Recap mode
 
-This development branch adds a separate chapter-level workflow without removing the existing Dialogue Recap, Narrated Recap, or Scene Flow modes.
+This branch adds a separate **Full Recap Studio** workflow to the AniFlow fork. Existing Dialogue Recap, Narrated Recap and Scene Flow modes remain available.
 
-## Product contract
+## Product workflow
 
-1. Load a source from an existing chapter folder, supported site URL, single image, ZIP/CBZ archive, or PDF.
-2. Detect and review clean art panels in reading order.
-3. Build visual notes from the source panels.
-4. Generate one continuous Russian recap script with semantic visual cues.
-5. Let the user review and edit that complete script.
-6. Send the complete approved script to the selected TTS provider once.
-7. Use speech timing only to place visuals; never split or re-synthesize narration to fit the pictures.
-8. Render one MP4 whose video track covers the entire narration duration.
+1. Load an episode from an existing chapter folder, a supported AniFlow website URL, a single image, a ZIP/CBZ archive, or a PDF.
+2. Detect and review art panels in reading order. Full Recap filters exact duplicates, truly blank pages, and likely promotional/decorative panels. Meaningful backgrounds and uncertain panels are retained.
+3. Analyse the kept panels, then generate one coherent Russian recap script for the complete episode. The script has semantic visual cues which refer to the original panel IDs.
+4. Review and edit the complete script.
+5. Select a TTS engine and voice. The complete approved script is sent as **one request** to the selected provider, producing **one continuous audio file**.
+6. Align the text to the audio only to place images. The audio is the master clock; it is never cut, split, stretched or shortened to fit the images.
+7. Review the visual timeline. You can replace a selected panel in a cue without changing the audio or its timing. Short narration fragments avoid rapid-fire cuts; the current default targets at least about two seconds per visual shot when multiple panels are available.
+8. Render one MP4 with subtle Ken Burns motion and optional background music.
+9. Upload episode-specific thumbnail and title references. Generate three title options and three different thumbnail concepts at 1280×720.
 
-## New modules
+## Main modules
 
-- `pipeline/full_recap.py`: visual context collection and one full-script LLM call.
-- `pipeline/full_recap_audio.py`: one TTS invocation for the complete script.
-- `pipeline/audio_alignment.py`: SRT/faster-whisper word timing and cue-to-panel timeline.
-- `pipeline/full_recap_renderer.py`: continuous visual edit under one narration file.
+- `pipeline/full_recap.py`: panel context, filtering, multi-chapter panel IDs, one full-script LLM request and semantic visual cues.
+- `pipeline/full_recap_audio.py`: one full-script TTS request; no automatic text chunking.
+- `pipeline/elevenlabs_tts.py`: ElevenLabs long-form single-request synthesis with native word alignment.
+- `pipeline/audio_alignment.py`: SRT / native TTS / faster-whisper word timings and visual cue-to-panel timeline.
+- `pipeline/full_recap_renderer.py`: continuous visual edit under one unmodified narration file.
+- `pipeline/full_recap_media.py`: per-video reference storage, title-style analysis, title generation and thumbnail generation.
+- `pipeline/downloader.py`: secure ZIP/CBZ import, single-image import and optional PDF rasterization.
+- `RECAP_STUDIO.md`: this setup and behaviour reference.
 
-## Important behavior
+## Local setup (Windows)
 
-- The narration audio is the master clock.
-- If a cue is missing or alignment confidence is poor, the renderer uses a chronological fallback rather than inventing a scene.
-- During speech pauses, the previous image remains on screen.
-- The final visual remains until the narration file ends.
-- Background music is optional and mixed below the narration.
-- The final YouTube package can use uploaded thumbnail-style references and title screenshots for each episode.
-- Three thumbnail concepts are generated from separate prompts with the selected art panels and reference images. Russian thumbnail lettering is overlaid using Pillow after image generation.
-- Three title options are generated using the actual episode script and the uploaded title-style references.
-- Thumbnail generation requires `OPENAI_API_KEY` in the local `.env` file. The default image model is `gpt-image-2.5-sunburst`; `gpt-image-2.5-flare` is also available.
-- Do not commit the local `.env` file. The API key is read only by the local server.
-- Very large texts must fit the selected TTS provider's single-request limits. This mode deliberately does not auto-chunk the text. When a provider rejects an over-limit script, use a provider/model with a higher single-request limit or edit the script.
+Use the existing AniFlow setup first:
 
-## Thumbnail and title setup
-
-1. Copy `.env.example` to `.env` if you have not already done so.
-2. Set `OPENAI_API_KEY` in `.env` for reference-guided thumbnail generation.
-3. Restart AniFlow after changing the environment.
-4. In the final Full Recap step, upload thumbnail style references and title screenshots for that video, then generate the three options.
-
-The Images API accepts reference images on its edit endpoint. AniFlow supplies the uploaded references together with selected episode panels, requests 1280×720 artwork, and adds the Russian hook text after generation.
-
-## Source files
-
-- Local folders can contain page images.
-- ZIP and CBZ archives are imported without extracting arbitrary paths from the archive.
-- PDF pages are rasterized using PyMuPDF.
-- Install PDF support with `pip install PyMuPDF` or `pip install -r requirements-optional.txt`.
-
-## Optional dependency
-
-If a provider does not return word-level boundaries, install:
-
-```bash
-pip install -r requirements-optional.txt
+```powershell
+git clone https://github.com/Manakich/Aniflow.git
+cd Aniflow
+setup.bat
 ```
 
-## Status
+Or, if the repository is already cloned and the base app is installed:
 
-The core backend path is under active integration. The next work items are the Flask endpoints, the wizard UI for the full-recap mode, script editing, thumbnail/title generation, and end-to-end testing with real chapter assets and configured API keys.
+```powershell
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pip install -r requirements-optional.txt
+copy .env.example .env
+python app.py
+```
+
+Open the local web UI at `http://localhost:8080`.
+
+## API keys and providers
+
+- **Script model:** uses AniFlow's configured narration backend (for example, Ollama, Gemini, Claude or the configured OpenAI-compatible/9router transport).
+- **Russian voice:** Edge TTS can list Russian voices. ElevenLabs requires its API key to be set in the existing voice settings UI.
+- **ElevenLabs Full Recap:** defaults to Flash v2.5 and requests the complete script once via the with-timestamps endpoint. The implementation enforces a 40,000-character maximum for Flash v2.5 and a 10,000-character maximum for Multilingual v2. It does not split a longer script. Shorten the story or select a provider/model whose single-request limit can accommodate it.
+- **Alignment:** Edge TTS uses its accompanying subtitle stream; ElevenLabs returns timing from the same TTS request. Other providers can use the optional faster-whisper fallback.
+- **Thumbnails:** set `OPENAI_API_KEY` in the local `.env` file. Optional model and compatible endpoint settings are `OPENAI_IMAGE_MODEL` and `OPENAI_API_BASE_URL`. The key is read by the local server and must never be committed.
+- **PDF:** PyMuPDF is installed from `requirements-optional.txt`.
+
+## Important behaviour and safeguards
+
+- The narration audio is the master clock.
+- During a speech pause, the previous image stays on screen.
+- The final image remains on screen until the narration file ends.
+- Background music is optional and mixed below narration.
+- Panel filtering is conservative: if the vision classifier is uncertain, the image is kept.
+- Multi-chapter Full Recap assigns chapter-qualified panel IDs to avoid panel ID collisions between chapters.
+- References are stored per project. The final YouTube screen has separate upload and clear controls for thumbnail references and title references.
+- The timeline editor only changes panel selection; saved timestamp boundaries and audio remain unchanged.
+- Image generation creates three separate concepts using the episode's selected art panels and uploaded thumbnail references. Russian thumbnail lettering is overlaid after image generation for readable typography.
+- Generated titles use episode content and title-style references. They are not copied literally from the reference screenshots.
+
+## Current verification
+
+The GitHub Actions workflow checks:
+- Python compilation of the application and pipeline modules.
+- Full Recap unit tests for full-script generation, single-request TTS, timing alignment, panel filtering, ZIP/CBZ import, multi-chapter IDs, thumbnail/title generation and ElevenLabs alignment.
+- JavaScript syntax for the web UI.
+
+Latest checked commit: `9c119efe1dfd330953bcf88d8e66e99eb3f52cf5` — GitHub Actions succeeded.
+
+## Still required before calling it production-ready
+
+- Run the entire pipeline on real user-selected chapters with actual LLM/TTS/image API credentials and inspect the resulting MP4.
+- Verify that AniFlow's site scraper can access the specific source site and chapter URLs you plan to use.
+- Tune visual cue-to-panel choices against real episodes. The initial multi-panel distribution is intentionally conservative; the review screen lets you replace a wrong visual, but it is not a full professional drag-and-drop NLE.
+- Review the generated cover/title style against the supplied channel references and tune prompts based on actual outputs.
+- Test the complete install and render on the target Windows machine, GPU, available disk space and chosen TTS provider.
+
+The pull request is intentionally kept as a draft until these real-world checks are completed.
