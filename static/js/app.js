@@ -406,10 +406,13 @@ function renderSourceStep() {
         <input type="text" class="form-input" id="inputSourceFolder" style="flex:1"
                placeholder="/path/to/chapter/images" value="${esc(APP.sourceFolder)}">
         <button class="btn btn-secondary" onclick="browseFolderForSource()" style="white-space:nowrap;">
-          📁 Browse...
+          📁 Browse folder
+        </button>
+        <button class="btn btn-secondary" onclick="browseSourceFile()" style="white-space:nowrap;">
+          🗜️ Archive / PDF
         </button>
       </div>
-      <div class="text-xs text-dim mt-1">Folder containing .jpg/.png images for this chapter</div>
+      <div class="text-xs text-dim mt-1">Folder with page images, or one ZIP/CBZ/PDF/image file</div>
     </div>
 
     <div class="settings-panel">
@@ -998,6 +1001,20 @@ function prefillSourceSettings(s) {
   if (s.fast_mode) setSpeedSettings(s);
 }
 
+function browseSourceFile() {
+  fetch('/api/browse-source-file', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.path) {
+        const el = document.getElementById('inputSourceFolder');
+        if (el) el.value = data.path;
+      } else if (data.error) {
+        toast(data.error, 'error');
+      }
+    })
+    .catch(e => toast('File browser failed: ' + e.message, 'error'));
+}
+
 function browseFileFor(targetId) {
   fetch('/api/browse-file', { method: 'POST' })
     .then(r => r.json())
@@ -1017,7 +1034,7 @@ async function startSource() {
   const folder = document.getElementById('inputSourceFolder').value.trim();
 
   if (!name) return toast('Project name is required', 'error');
-  if (!folder) return toast('Folder path is required', 'error');
+  if (!folder) return toast('Source folder or archive file path is required', 'error');
 
   APP.projectName = name;
   APP.sourceFolder = folder;
