@@ -211,6 +211,25 @@ def build_panel_context(
     return contexts
 
 
+def merge_chapter_panels(chapter_panels: list[tuple[int, list[dict[str, Any]]]]) -> list[dict[str, Any]]:
+    """Combine processed chapter panels with unique stable IDs and source metadata.
+
+    The original panel_id is kept separately for debugging; the synthetic
+    chapter-qualified ID is what the recap script, timeline and renderer share.
+    """
+    merged: list[dict[str, Any]] = []
+    for chapter_number, panels in chapter_panels:
+        for index, panel in enumerate(panels, start=1):
+            item = dict(panel)
+            original_id = panel.get("panel_id", index)
+            safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(original_id)).strip("_") or str(index)
+            item["source_chapter"] = int(chapter_number)
+            item["source_panel_id"] = original_id
+            item["panel_id"] = f"ch{int(chapter_number):05d}_{safe_id}"
+            merged.append(item)
+    return merged
+
+
 def _extract_json_object(raw: str) -> dict[str, Any] | None:
     if not raw:
         return None
@@ -259,7 +278,7 @@ def generate_full_recap_script(
                 continue
             known_ids[str(panel_id)] = panel_id
             context_lines.append(
-                f"Кадр №{panel.get('sequence_number', len(known_ids) + 1)} "
+                f"Глава {panel.get('source_chapter', '—')}, кадр №{panel.get('sequence_number', len(known_ids) + 1)} "
                 f"(ID панели {panel_id}): {panel.get('visual_note') or 'описание отсутствует'}. "
                 f"Распознанный текст: {panel.get('dialogue') or 'нет'}."
             )
