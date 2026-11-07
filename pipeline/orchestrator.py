@@ -3099,6 +3099,16 @@ class Orchestrator:
             workspace = state.full_recap_workspace_dir or state.project_dir
             title_refs = list_reference_files(workspace, "titles")
             title_ref_paths = [item["path"] for item in title_refs]
+            title_reference_text = (s.get('full_recap_title_reference_text') or '').strip()
+            if not title_ref_paths and not title_reference_text:
+                state.error = (
+                    "Добавьте референс названия: загрузите скриншот примера "
+                    "или вставьте несколько названий текстом."
+                )
+                state.full_recap_package_status = "missing_title_references"
+                state.save()
+                return state
+
             thumb_refs = list_reference_files(workspace, "thumbnails")
             if not thumb_refs:
                 state.error = "Загрузите хотя бы один референс обложки перед генерацией."
