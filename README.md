@@ -49,6 +49,18 @@ AniFlow downloads manhwa/webtoon chapters, detects and crops panels using YOLO, 
 
 > 📂 **See it in action!** Check the [`example_output/`](example_output/) folder for sample clips from both modes.
 
+### 🧪 Full Recap Studio (experimental)
+
+The `feat/full-recap-studio` development branch adds a separate full-episode workflow:
+
+- One complete Russian recap script and one continuous TTS audio request.
+- Images are aligned to the narration; the audio is never split or changed to fit the visuals.
+- ZIP/CBZ and optional PDF chapter imports, conservative panel filtering and multi-chapter episodes.
+- Visual timeline review with panel replacement, subtle motion and MP4 export.
+- Three reference-guided thumbnail concepts and three title options per episode.
+
+See [`RECAP_STUDIO.md`](RECAP_STUDIO.md) for setup and known limitations. The feature remains experimental until it passes a real end-to-end render on a local Windows machine.
+
 ### 🎥 Video Tutorials
 
 | Tutorial | Link |
