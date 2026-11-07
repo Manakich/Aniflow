@@ -167,6 +167,10 @@ class PipelineState:
         self.full_recap_timeline = {}
         self.full_recap_video_path = None
         self.full_recap_status = "not_started"
+        self.full_recap_titles = []
+        self.full_recap_selected_title = None
+        self.full_recap_thumbnails = []
+        self.full_recap_package_status = "not_started"
         self.boxes1_cropped_hash = ""
         self.boxes2_cropped_hash = ""
         
@@ -515,6 +519,10 @@ class PipelineState:
         self.full_recap_timeline = data.get('full_recap_timeline', {})
         self.full_recap_video_path = data.get('full_recap_video_path')
         self.full_recap_status = data.get('full_recap_status', "not_started")
+        self.full_recap_titles = data.get('full_recap_titles', [])
+        self.full_recap_selected_title = data.get('full_recap_selected_title')
+        self.full_recap_thumbnails = data.get('full_recap_thumbnails', [])
+        self.full_recap_package_status = data.get('full_recap_package_status', "not_started")
         self.boxes1_cropped_hash = data.get('boxes1_cropped_hash', '')
         self.boxes2_cropped_hash = data.get('boxes2_cropped_hash', '')
 
@@ -592,6 +600,10 @@ class PipelineState:
             'full_recap_timeline': self.full_recap_timeline,
             'full_recap_video_path': self.full_recap_video_path,
             'full_recap_status': self.full_recap_status,
+            'full_recap_titles': self.full_recap_titles,
+            'full_recap_selected_title': self.full_recap_selected_title,
+            'full_recap_thumbnails': self.full_recap_thumbnails,
+            'full_recap_package_status': self.full_recap_package_status,
             'settings': self.settings,
             'boxes1_cropped_hash': self.boxes1_cropped_hash,
             'boxes2_cropped_hash': self.boxes2_cropped_hash,
@@ -2926,6 +2938,75 @@ class Orchestrator:
         except Exception as e:
             state.error = str(e)
             state.full_recap_status = "video_failed"
+            state.save()
+        return state
+
+
+    def step_full_recap_package(self, state):
+        """Generate three factual title options and three reference-guided thumbnails."""
+        if not state.full_recap_script:
+            state.error = "Сначала создайте полный сценарий."
+            state.save()
+            return state
+        try:
+            from pipeline.full_recap_media import (
+                generate_title_options, generate_thumbnail_variants, list_reference_files
+            )
+            s = state.settings
+            backend = self.narrator.transport
+            text_model = s.get('full_recap_text_model') or getattr(
+                config, 'TEXT_WRITER_MODEL', config.OLLAMA_MODEL
+            )
+            try:
+                text_model = self.narrator._resolve_model(text_model)
+            except Exception:
+                pass
+            vision_model = getattr(self.narrator, 'vision_model', None) or config.VISION_MODEL
+
+            title_refs = list_reference_files(state.project_dir, "titles")
+            title_ref_paths = [item["path"] for item in title_refs]
+            thumb_refs = list_reference_files(state.project_dir, "thumbnails")
+            if not thumb_refs:
+                state.error = "Загрузите хотя бы один референс обложки перед генерацией."
+                state.full_recap_package_status = "missing_thumbnail_references"
+                state.save()
+                return state
+
+            self._emit_progress('full_recap_package', 0, 6, "Подготовка названий и референсов…")
+            title_result = generate_title_options(
+                state.full_recap_script,
+                state.full_recap_panel_context,
+                backend,
+                text_model,
+                title_reference_text=s.get('full_recap_title_reference_text', ''),
+                title_reference_paths=title_ref_paths,
+                vision_model=vision_model,
+            )
+            state.full_recap_titles = title_result["titles"]
+            state.full_recap_selected_title = None
+            state.full_recap_package_status = "titles_ready"
+            state.save()
+
+            image_model = s.get('openai_image_model', 'gpt-image-2.5-sunburst')
+            thumbnails = generate_thumbnail_variants(
+                state.project_dir,
+                state.full_recap_script,
+                state.full_recap_panel_context,
+                state.panels,
+                state.full_recap_titles,
+                model=image_model,
+                progress_callback=lambda c, t, m: self._emit_progress(
+                    'full_recap_package', c + 1, 6, m
+                ),
+            )
+            state.full_recap_thumbnails = thumbnails
+            state.full_recap_package_status = "ready"
+            state.error = None
+            state.save()
+            self._emit_progress('full_recap_package', 6, 6, "Три обложки и три названия готовы.")
+        except Exception as e:
+            state.error = str(e)
+            state.full_recap_package_status = "failed"
             state.save()
         return state
 
