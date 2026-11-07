@@ -1,0 +1,1 @@
+# Optional CPU/GPU speech alignment fallback for non-Edge TTS engines\nfaster-whisper>=1.0.0\n
