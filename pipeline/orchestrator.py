@@ -2987,7 +2987,9 @@ class Orchestrator:
             state.full_recap_package_status = "titles_ready"
             state.save()
 
-            image_model = s.get('openai_image_model', 'gpt-image-2.5-sunburst')
+            image_model = s.get('openai_image_model') or os.getenv(
+                'OPENAI_IMAGE_MODEL', 'gpt-image-2.5-sunburst'
+            )
             thumbnails = generate_thumbnail_variants(
                 state.project_dir,
                 state.full_recap_script,
@@ -2995,6 +2997,7 @@ class Orchestrator:
                 state.panels,
                 state.full_recap_titles,
                 model=image_model,
+                base_url=os.getenv('OPENAI_API_BASE_URL', 'https://api.openai.com/v1'),
                 progress_callback=lambda c, t, m: self._emit_progress(
                     'full_recap_package', c + 1, 6, m
                 ),
