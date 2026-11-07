@@ -158,6 +158,15 @@ class PipelineState:
         self.error = None
         self.video_path = None
         self.video_clips = []  # List of generated clip metadata
+        # Separate, backward-compatible state for the continuous full-recap mode.
+        self.full_recap_panel_context = []
+        self.full_recap_script = ""
+        self.full_recap_visual_cues = []
+        self.full_recap_audio_path = None
+        self.full_recap_word_timestamps = []
+        self.full_recap_timeline = {}
+        self.full_recap_video_path = None
+        self.full_recap_status = "not_started"
         self.boxes1_cropped_hash = ""
         self.boxes2_cropped_hash = ""
         
@@ -498,6 +507,14 @@ class PipelineState:
         self.error = data.get('error')
         self.video_path = data.get('video_path')
         self.video_clips = data.get('video_clips', [])
+        self.full_recap_panel_context = data.get('full_recap_panel_context', [])
+        self.full_recap_script = data.get('full_recap_script', "")
+        self.full_recap_visual_cues = data.get('full_recap_visual_cues', [])
+        self.full_recap_audio_path = data.get('full_recap_audio_path')
+        self.full_recap_word_timestamps = data.get('full_recap_word_timestamps', [])
+        self.full_recap_timeline = data.get('full_recap_timeline', {})
+        self.full_recap_video_path = data.get('full_recap_video_path')
+        self.full_recap_status = data.get('full_recap_status', "not_started")
         self.boxes1_cropped_hash = data.get('boxes1_cropped_hash', '')
         self.boxes2_cropped_hash = data.get('boxes2_cropped_hash', '')
 
@@ -567,6 +584,14 @@ class PipelineState:
             'error': self.error,
             'video_path': self.video_path,
             'video_clips': self.video_clips,
+            'full_recap_panel_context': self.full_recap_panel_context,
+            'full_recap_script': self.full_recap_script,
+            'full_recap_visual_cues': self.full_recap_visual_cues,
+            'full_recap_audio_path': self.full_recap_audio_path,
+            'full_recap_word_timestamps': self.full_recap_word_timestamps,
+            'full_recap_timeline': self.full_recap_timeline,
+            'full_recap_video_path': self.full_recap_video_path,
+            'full_recap_status': self.full_recap_status,
             'settings': self.settings,
             'boxes1_cropped_hash': self.boxes1_cropped_hash,
             'boxes2_cropped_hash': self.boxes2_cropped_hash,
@@ -2700,6 +2725,203 @@ class Orchestrator:
                 f"Generated {len(clip_metadata)} clips! Total duration: {total_duration:.1f}s")
         except Exception as e:
             state.error = str(e)
+            state.save()
+        return state
+
+
+    # ─── Full Recap Studio (one full script + one audio track) ─────────
+
+    def step_full_recap_script(self, state):
+        """Analyse clean art panels and generate one continuous Russian script."""
+        if not state.panels:
+            state.error = "Сначала подготовьте и проверьте изображения (Crop 2)."
+            state.save()
+            return state
+        try:
+            self._emit_progress('full_recap_script', 0, len(state.panels),
+                                "Анализ изображений для цельного пересказа…")
+            from pipeline.full_recap import build_panel_context, generate_full_recap_script
+            s = state.settings
+            backend = self.narrator.transport
+            vision_model = getattr(self.narrator, 'vision_model', None) or config.VISION_MODEL
+            text_model = s.get('full_recap_text_model') or getattr(
+                config, 'TEXT_WRITER_MODEL', config.OLLAMA_MODEL
+            )
+            try:
+                text_model = self.narrator._resolve_model(text_model)
+            except Exception:
+                pass
+
+            cast_characters = self._load_cast_characters(state)
+            context = build_panel_context(
+                state.panels, backend, vision_model,
+                scene_size=int(s.get('full_recap_scene_size', 5)),
+                cancel_check=lambda: self._should_cancel,
+                progress_callback=lambda c, t, m: self._emit_progress(
+                    'full_recap_script', c, t, m
+                ),
+            )
+            if self._should_cancel:
+                state.error = "Генерация пересказа отменена."
+                state.save()
+                return state
+
+            result = generate_full_recap_script(
+                context, backend, text_model,
+                cast_characters=cast_characters,
+                style_profile=s.get(
+                    'full_recap_style',
+                    'Динамичный, разговорный, естественный русский пересказ для YouTube.'
+                ),
+                story_context=s.get('full_recap_story_context', ''),
+            )
+            state.full_recap_panel_context = context
+            state.full_recap_script = result['full_text']
+            state.full_recap_visual_cues = result['visual_cues']
+            state.full_recap_word_timestamps = []
+            state.full_recap_timeline = {}
+            state.full_recap_video_path = None
+            state.full_recap_status = "script_ready"
+            state.error = None
+
+            recap_dir = os.path.join(state.project_dir, "full_recap")
+            os.makedirs(recap_dir, exist_ok=True)
+            with open(os.path.join(recap_dir, "recap_script.json"), "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            state.save()
+            self._emit_progress('full_recap_script', 1, 1, "Цельный сценарий готов.")
+        except Exception as e:
+            state.error = str(e)
+            state.full_recap_status = "script_failed"
+            state.save()
+        return state
+
+    def step_full_recap_audio(self, state):
+        """Send the complete approved script to TTS once and save one audio file."""
+        if not (state.full_recap_script or "").strip():
+            state.error = "Сначала сгенерируйте или сохраните цельный сценарий."
+            state.save()
+            return state
+        try:
+            from pipeline.full_recap_audio import generate_full_narration_audio
+            s = state.settings
+            os.makedirs(state.audio_dir, exist_ok=True)
+            audio_path = os.path.join(state.audio_dir, "full_recap_narration.mp3")
+            self._emit_progress('full_recap_audio', 0, 1, "Генерация единой озвучки…")
+            result = generate_full_narration_audio(
+                state.full_recap_script,
+                audio_path,
+                engine=s.get('tts_engine', 'edge'),
+                voice=s.get('tts_voice'),
+                rate=s.get('tts_rate'),
+                pitch=s.get('tts_pitch'),
+                speed=float(s.get('tts_speed', 1.0)),
+            )
+            state.full_recap_audio_path = result['audio_path']
+            state.full_recap_word_timestamps = []
+            subtitle_path = result.get('subtitle_path')
+            if subtitle_path and os.path.isfile(subtitle_path):
+                from pipeline.audio_alignment import parse_srt_word_timestamps
+                with open(subtitle_path, 'r', encoding='utf-8') as f:
+                    state.full_recap_word_timestamps = parse_srt_word_timestamps(f.read())
+            state.full_recap_timeline = {}
+            state.full_recap_video_path = None
+            state.full_recap_status = "audio_ready"
+            state.error = None
+            state.save()
+            self._emit_progress('full_recap_audio', 1, 1, "Единая озвучка готова.")
+        except Exception as e:
+            state.error = str(e)
+            state.full_recap_status = "audio_failed"
+            state.save()
+        return state
+
+    def step_full_recap_timeline(self, state):
+        """Align the visual timeline to the existing audio; never call TTS here."""
+        if not state.full_recap_audio_path or not os.path.isfile(state.full_recap_audio_path):
+            state.error = "Сначала сгенерируйте озвучку."
+            state.save()
+            return state
+        try:
+            from pipeline.audio_alignment import (
+                build_visual_timeline, transcribe_word_timestamps
+            )
+            from pipeline.tts_engine import _get_audio_duration
+            timestamps = state.full_recap_word_timestamps or []
+            if not timestamps:
+                self._emit_progress('full_recap_timeline', 0, 1,
+                                    "Распознавание временных меток речи…")
+                timestamps = transcribe_word_timestamps(
+                    state.full_recap_audio_path,
+                    model_size=state.settings.get('alignment_model_size', 'small'),
+                    device=state.settings.get('alignment_device', 'cpu'),
+                    compute_type=state.settings.get('alignment_compute_type', 'int8'),
+                )
+            audio_duration = float(_get_audio_duration(state.full_recap_audio_path))
+            if audio_duration <= 0:
+                raise ValueError("Не удалось определить длительность озвучки")
+            panel_ids = [p.get('panel_id') for p in state.panels if p.get('panel_id') is not None]
+            timeline = build_visual_timeline(
+                state.full_recap_script,
+                state.full_recap_visual_cues,
+                timestamps,
+                audio_duration,
+                fallback_panel_ids=panel_ids,
+            )
+            state.full_recap_word_timestamps = timestamps
+            state.full_recap_timeline = timeline
+            state.full_recap_status = "timeline_ready"
+            state.error = None
+            state.save()
+            self._emit_progress('full_recap_timeline', 1, 1, "Визуальный таймлайн готов.")
+        except Exception as e:
+            state.error = str(e)
+            state.full_recap_status = "timeline_failed"
+            state.save()
+        return state
+
+    def step_full_recap_video(self, state):
+        """Render the complete visual timeline under one unmodified narration file."""
+        if not state.full_recap_timeline or not state.full_recap_audio_path:
+            state.error = "Сначала создайте озвучку и визуальный таймлайн."
+            state.save()
+            return state
+        try:
+            from pipeline.full_recap_renderer import render_full_recap_video
+            s = state.settings
+            output_dir = os.path.join(config.VIDEO_OUTPUT_DIR, state.project_name)
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(output_dir, "full_recap.mp4")
+            self._emit_progress('full_recap_video', 0, 1, "Монтаж видео под единую озвучку…")
+            custom_bg = s.get('custom_bg_path', '')
+            if custom_bg and not os.path.isabs(custom_bg):
+                custom_bg = os.path.join(config.BACKGROUNDS_DIR, custom_bg)
+            render_full_recap_video(
+                state.panels,
+                state.full_recap_timeline,
+                state.full_recap_audio_path,
+                output_path,
+                resolution=s.get('video_resolution', '1080p'),
+                fps=s.get('video_fps', 30),
+                quality=s.get('video_quality', 'medium'),
+                bg_mode=s.get('bg_mode', 'blur'),
+                custom_bg_path=custom_bg or None,
+                animation_style=s.get('animation_style', 'auto'),
+                watermark_path=s.get('watermark_path') or None,
+                bgm_path=s.get('bgm_path') or None,
+                bgm_volume=float(s.get('bgm_volume', config.BGM_VOLUME)),
+                progress_callback=lambda c, t, m: self._emit_progress(
+                    'full_recap_video', c, t, m
+                ),
+            )
+            state.full_recap_video_path = output_path
+            state.full_recap_status = "video_ready"
+            state.error = None
+            state.save()
+            self._emit_progress('full_recap_video', 1, 1, "Готовый MP4 создан.")
+        except Exception as e:
+            state.error = str(e)
+            state.full_recap_status = "video_failed"
             state.save()
         return state
 
