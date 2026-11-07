@@ -3336,8 +3336,11 @@ function renderFullRecapScriptPreview() {
   el.value = text;
   const meta = document.getElementById("fullRecapScriptMeta");
   if (meta) {
+    const kept = FULL_RECAP_DATA?.kept_panel_count || 0;
+    const skipped = FULL_RECAP_DATA?.skipped_panel_count || 0;
+    const filterInfo = kept || skipped ? ` · кадров: ${kept} оставлено / ${skipped} пропущено` : "";
     meta.textContent = text
-      ? `${text.length.toLocaleString("ru-RU")} символов · ${FULL_RECAP_DATA?.visual_cues?.length || 0} смысловых визуальных отрезков`
+      ? `${text.length.toLocaleString("ru-RU")} символов · ${FULL_RECAP_DATA?.visual_cues?.length || 0} смысловых визуальных отрезков${filterInfo}`
       : "Сценарий ещё не создан.";
   }
 }
