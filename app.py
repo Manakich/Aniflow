@@ -287,6 +287,49 @@ def browse_folder():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/full-recap/<project_name>', methods=['GET'])
+def get_full_recap(project_name):
+    """Return full-recap artefacts without changing the legacy project payload."""
+    state = PipelineState.load(project_name)
+    return jsonify({
+        'status': state.full_recap_status,
+        'script': state.full_recap_script,
+        'visual_cues': state.full_recap_visual_cues,
+        'audio_path': state.full_recap_audio_path,
+        'timeline': state.full_recap_timeline,
+        'video_path': state.full_recap_video_path,
+        'panel_count': len(state.panels),
+        'settings': {
+            'tts_engine': state.settings.get('tts_engine', 'edge'),
+            'tts_voice': state.settings.get('tts_voice', ''),
+            'full_recap_text_model': state.settings.get('full_recap_text_model', ''),
+            'full_recap_style': state.settings.get('full_recap_style', ''),
+        },
+    })
+
+
+@app.route('/api/full-recap/<project_name>/script', methods=['PUT'])
+def update_full_recap_script(project_name):
+    """Save the user-edited complete script. Does not call TTS or any AI API."""
+    data = request.get_json(silent=True) or {}
+    full_text = str(data.get('full_text') or '').strip()
+    if not full_text:
+        return jsonify({'error': 'Сценарий не может быть пустым'}), 400
+    state = PipelineState.load(project_name)
+    state.full_recap_script = full_text
+    # Old cue spans may no longer match edited text. Clear them so the timeline
+    # builder uses the explicit chronological fallback instead of stale offsets.
+    state.full_recap_visual_cues = []
+    state.full_recap_word_timestamps = []
+    state.full_recap_timeline = {}
+    state.full_recap_audio_path = None
+    state.full_recap_video_path = None
+    state.full_recap_status = 'script_edited'
+    state.error = None
+    state.save()
+    return jsonify({'status': 'saved', 'characters': len(full_text)})
+
+
 @app.route('/api/projects/<name>/state', methods=['GET'])
 def get_project_state(name):
     """Lightweight state read — just settings + panel metadata (no heavy image data)."""
@@ -433,7 +476,9 @@ def _run_with_settings(step_fn, project_name, data):
         state.save()
     # Also accept top-level convenience keys
     for key in ('scene_size', 'scene_mode', 'ollama_model', 'tts_voice',
-                'tts_engine', 'tts_speed', 'pipeline_mode'):
+                'tts_engine', 'tts_speed', 'pipeline_mode', 'full_recap_text_model',
+                'full_recap_scene_size', 'full_recap_style', 'full_recap_story_context',
+                'alignment_model_size', 'alignment_device', 'alignment_compute_type'):
         if key in data:
             state.settings[key] = data[key]
     return step_fn(state)
@@ -482,6 +527,11 @@ def run_step(step_name):
         'narrate_scenes': lambda: _run_with_settings(orchestrator.step_narrate_scenes, project_name, data),
         'scene_audio': lambda: _run_with_settings(orchestrator.step_generate_scene_audio, project_name, data),
         'scene_clips': lambda: _run_with_settings(orchestrator.step_export_scene_clips, project_name, data),
+        # Full Recap Studio — one script, one audio file, visuals follow speech.
+        'full_recap_script': lambda: _run_with_settings(orchestrator.step_full_recap_script, project_name, data),
+        'full_recap_audio': lambda: _run_with_settings(orchestrator.step_full_recap_audio, project_name, data),
+        'full_recap_timeline': lambda: _run_with_settings(orchestrator.step_full_recap_timeline, project_name, data),
+        'full_recap_video': lambda: _run_with_settings(orchestrator.step_full_recap_video, project_name, data),
     }
     if step_name not in step_map:
         return jsonify({'error': f'Unknown step: {step_name}'}), 400
