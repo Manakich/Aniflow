@@ -304,6 +304,23 @@ def get_full_recap(project_name):
         'visual_cues': state.full_recap_visual_cues,
         'audio_path': state.full_recap_audio_path,
         'timeline': state.full_recap_timeline,
+        'panels': [
+            {
+                'panel_id': panel.get('panel_id'),
+                'sequence_number': context_panel.get('sequence_number'),
+                'source_chapter': panel.get('source_chapter'),
+            }
+            for panel in (state.full_recap_panels or state.panels)
+            for context_panel in [
+                next((
+                    item for scene in state.full_recap_panel_context
+                    if scene.get('scene_id') != 'filter_summary'
+                    for item in scene.get('panels', [])
+                    if str(item.get('panel_id')) == str(panel.get('panel_id'))
+                ), {})
+            ]
+            if context_panel and panel.get('panel_id') is not None
+        ],
         'video_path': state.full_recap_video_path,
         'titles': state.full_recap_titles,
         'selected_title': state.full_recap_selected_title,
@@ -470,6 +487,47 @@ def serve_full_recap_panel(project_name, panel_id):
     import mimetypes
     mime_type = mimetypes.guess_type(image_path)[0] or 'application/octet-stream'
     return send_file(image_path, mimetype=mime_type, conditional=True)
+
+
+@app.route('/api/full-recap/<project_name>/timeline', methods=['PUT'])
+def update_full_recap_timeline(project_name):
+    """Update selected visual panels without changing audio or timestamp boundaries."""
+    data = request.get_json(silent=True) or {}
+    requested = data.get('entries')
+    if not isinstance(requested, list):
+        return jsonify({'error': 'Ожидается список entries'}), 400
+
+    state = PipelineState.load(project_name)
+    current = (state.full_recap_timeline or {}).get('entries') or []
+    if len(requested) != len(current):
+        return jsonify({'error': 'Количество визуальных отрезков изменилось. Перезагрузите таймлайн.'}), 409
+
+    kept_ids = {
+        str(panel.get('panel_id'))
+        for scene in state.full_recap_panel_context
+        if scene.get('scene_id') != 'filter_summary'
+        for panel in scene.get('panels', [])
+        if panel.get('panel_id') is not None
+    }
+    updated = []
+    for index, (original, change) in enumerate(zip(current, requested)):
+        if not isinstance(change, dict):
+            return jsonify({'error': f'Некорректный отрезок {index + 1}'}), 400
+        panel_id = str(change.get('panel_id') or '')
+        if panel_id not in kept_ids:
+            return jsonify({'error': f'Кадр {panel_id or "(empty)"} не входит в список проверенных изображений'}), 400
+        # Only the selected image is editable here. Keep all original audio timings,
+        # motions, confidence and semantic cue metadata exactly as saved.
+        item = dict(original)
+        item['panel_id'] = panel_id
+        updated.append(item)
+
+    state.full_recap_timeline['entries'] = updated
+    state.full_recap_video_path = None
+    state.full_recap_status = 'timeline_edited'
+    state.error = None
+    state.save()
+    return jsonify({'status': 'saved', 'entries': len(updated)})
 
 
 @app.route('/api/full-recap/<project_name>/video', methods=['GET'])
