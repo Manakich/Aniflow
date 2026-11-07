@@ -1098,6 +1098,13 @@ function renderStitchStep() {
     <div id="stitchBoxCount" class="text-xs text-dim mt-1"></div>`;
 
   const isNarrated = APP.mode === 'narrated' || APP.mode === 'full_recap';
+  if (APP.mode === 'full_recap') {
+    const preview = document.createElement('div');
+    preview.id = 'fullRecapAudioPreview';
+    preview.style.marginTop = '16px';
+    document.getElementById('stepBody').appendChild(preview);
+  }
+
   const actions = document.getElementById('stepActions');
   actions.innerHTML = `
     <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
@@ -3442,6 +3449,21 @@ async function saveFullRecapScript() {
   }
 }
 
+function renderFullRecapAudioPreview() {
+  const el = document.getElementById("fullRecapAudioPreview");
+  if (!el) return;
+  if (!FULL_RECAP_DATA?.audio_path) {
+    el.innerHTML = '<div class="text-xs text-dim">Полная озвучка ещё не создана.</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">🎧 Прослушать единую озвучку</div>
+      <audio controls preload="metadata" style="width:100%;" src="/api/full-recap/${encodeURIComponent(APP.projectName)}/audio"></audio>
+      <div class="text-xs text-dim mt-1">Один аудиофайл на весь выпуск. Изображения будут подстраиваться под эту дорожку.</div>
+    </div>`;
+}
+
 function renderFullRecapTimelinePreview() {
   const el = document.getElementById("fullTimelinePreview");
   if (!el) return;
@@ -3456,10 +3478,18 @@ function renderFullRecapTimelinePreview() {
       <div class="settings-panel-title">🎞️ Визуальный таймлайн готов</div>
       <div class="text-sm">${timeline.entries.length} визуальных отрезков · ${Number(timeline.audio_duration || 0).toFixed(1)} сек. · средняя уверенность привязки ${Math.round(avg * 100)}%</div>
       <div class="text-xs text-dim mt-1">Озвучка остаётся одной непрерывной дорожкой. Во время пауз предыдущий кадр сохраняется на экране.</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:6px;margin-top:12px;">
-        ${timeline.entries.slice(0,36).map((entry,index)=>`<div style="padding:7px;background:var(--bg-secondary);border-radius:6px;font-size:11px;">#${esc(String(entry.panel_id))}<br><span class="text-dim">${Number(entry.start).toFixed(1)}–${Number(entry.end).toFixed(1)}с</span></div>`).join("")}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:12px;">
+        ${timeline.entries.slice(0,48).map((entry,index)=>`
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+            <img src="/api/full-recap/${encodeURIComponent(APP.projectName)}/panels/${encodeURIComponent(String(entry.panel_id))}" alt="Кадр ${index+1}" loading="lazy" style="display:block;width:100%;height:112px;object-fit:contain;background:#080808;">
+            <div style="padding:8px;font-size:11px;">
+              <strong>Кадр ${index+1}</strong>
+              <span class="text-dim" style="display:block;">${Number(entry.start).toFixed(1)}–${Number(entry.end).toFixed(1)} сек. · ${Math.round(Number(entry.confidence || 0)*100)}%</span>
+              <span style="display:block;margin-top:5px;line-height:1.35;">${esc(entry.cue_text || "Сюжетный визуальный фрагмент")}</span>
+            </div>
+          </div>`).join("")}
       </div>
-      ${timeline.entries.length > 36 ? `<div class="text-xs text-dim mt-2">Показаны первые 36 из ${timeline.entries.length} отрезков.</div>` : ""}
+      ${timeline.entries.length > 48 ? `<div class="text-xs text-dim mt-2">Показаны первые 48 из ${timeline.entries.length} кадров.</div>` : ""}
     </div>`;
 }
 
@@ -3900,6 +3930,9 @@ function renderTTSStep() {
     fullRecapModel.value = APP.projectData.settings.full_recap_elevenlabs_model;
   }
   handleTTSEngineChange();
+  if (APP.mode === 'full_recap') {
+    loadFullRecapData().then(() => renderFullRecapAudioPreview());
+  }
 }
 
 async function handleTTSEngineChange() {
@@ -4759,6 +4792,7 @@ socket.on('step_complete', (data) => {
   if (String(data.step || '').startsWith('full_recap_')) {
     loadFullRecapData().then(() => {
       if (data.step === 'full_recap_script') renderFullRecapScriptPreview();
+      if (data.step === 'full_recap_audio') renderFullRecapAudioPreview();
       if (data.step === 'full_recap_timeline') renderFullRecapTimelinePreview();
       if (data.step === 'full_recap_video') renderFullRecapVideoPreview();
       if (data.step === 'full_recap_package') loadFullRecapPackageData().then(() => renderFullRecapPackagePreview());
