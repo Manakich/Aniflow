@@ -308,6 +308,16 @@ def get_full_recap(project_name):
     })
 
 
+@app.route('/api/full-recap/<project_name>/video', methods=['GET'])
+def serve_full_recap_video(project_name):
+    """Stream the rendered Full Recap MP4."""
+    state = PipelineState.load(project_name)
+    path = state.full_recap_video_path
+    if not path or not os.path.isfile(path):
+        return jsonify({'error': 'Full Recap video has not been rendered yet'}), 404
+    return send_file(path, mimetype='video/mp4', as_attachment=False)
+
+
 @app.route('/api/full-recap/<project_name>/script', methods=['PUT'])
 def update_full_recap_script(project_name):
     """Save the user-edited complete script. Does not call TTS or any AI API."""
