@@ -84,7 +84,7 @@ def test_visual_timeline_can_use_multiple_panels_for_one_phrase():
     entries = timeline["entries"]
     assert [item["panel_id"] for item in entries] == [1, 2, 3]
     assert entries[0]["start"] == 0.0
-    assert entries[-1]["end"] == 6.0
+    assert entries[-1]["end"] == 9.0
     assert all(entries[i]["end"] <= entries[i + 1]["end"] for i in range(len(entries) - 1))
 
 
