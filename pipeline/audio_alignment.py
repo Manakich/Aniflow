@@ -212,8 +212,20 @@ def build_visual_timeline(
         if end <= start:
             continue
 
-        # Multiple panels may illustrate one phrase. Start with equal intervals;
-        # users can later refine these in the visual timeline editor.
+        # Avoid rapid-fire cuts. A short spoken fragment gets one strong image;
+        # longer fragments can use more panels, with a target minimum shot length.
+        min_shot_seconds = 2.0
+        max_shots = max(1, int((end - start) / min_shot_seconds))
+        if len(panel_ids) > max_shots:
+            if max_shots == 1:
+                panel_ids = [panel_ids[0]]
+            else:
+                selected_indexes = [
+                    round(index * (len(panel_ids) - 1) / (max_shots - 1))
+                    for index in range(max_shots)
+                ]
+                panel_ids = [panel_ids[index] for index in selected_indexes]
+
         step = (end - start) / len(panel_ids)
         for index, panel_id in enumerate(panel_ids):
             raw_shots.append({
