@@ -356,6 +356,24 @@ def upload_full_recap_references(project_name, kind):
         return jsonify({'error': str(e)}), 400
 
 
+@app.route('/api/full-recap/<project_name>/references/<kind>', methods=['DELETE'])
+def clear_full_recap_references(project_name, kind):
+    """Clear one reference set before preparing a different video."""
+    if kind not in ('thumbnails', 'titles'):
+        return jsonify({'error': 'Reference type must be thumbnails or titles'}), 400
+    try:
+        from pipeline.full_recap_media import clear_reference_files
+        state = PipelineState.load(project_name)
+        removed = clear_reference_files(
+            state.full_recap_workspace_dir or state.project_dir, kind
+        )
+        state.full_recap_package_status = 'references_updated'
+        state.save()
+        return jsonify({'status': 'cleared', 'kind': kind, 'removed': removed})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/full-recap/<project_name>/package', methods=['GET'])
 def get_full_recap_package(project_name):
     """Return generated metadata and uploaded reference filenames."""
