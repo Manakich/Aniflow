@@ -3607,6 +3607,23 @@ async function loadFullRecapPackageData() {
   }
 }
 
+async function clearFullRecapReferences(kind) {
+  if (!confirm("Удалить все сохранённые референсы этого типа для текущего проекта?")) return;
+  try {
+    const response = await fetch(
+      `/api/full-recap/${encodeURIComponent(APP.projectName)}/references/${kind}`,
+      { method: "DELETE" }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось очистить референсы");
+    await loadFullRecapPackageData();
+    renderFullRecapPackagePreview();
+    toast(`Удалено референсов: ${data.removed || 0}`, "success");
+  } catch (error) {
+    toast("Ошибка очистки: " + error.message, "error");
+  }
+}
+
 async function uploadFullRecapReferences(kind, inputId) {
   const input = document.getElementById(inputId);
   const files = Array.from(input?.files || []);
@@ -3695,13 +3712,19 @@ function renderFullRecapPackageStep() {
     <div class="settings-panel">
       <div class="settings-panel-title">🖼️ Референсы обложек</div>
       <input id="fullRecapThumbnailRefs" type="file" accept="image/png,image/jpeg,image/webp" multiple class="form-input">
-      <button class="btn btn-secondary mt-2" onclick="uploadFullRecapReferences('thumbnails','fullRecapThumbnailRefs')">Загрузить референсы обложек</button>
-      <div class="text-xs text-dim mt-1">Можно загрузить до 16 PNG/JPG/WEBP. На каждую генерацию прикладываются актуальные референсы и выбранные панели главы.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-secondary" onclick="uploadFullRecapReferences('thumbnails','fullRecapThumbnailRefs')">Загрузить референсы обложек</button>
+        <button class="btn btn-ghost" onclick="clearFullRecapReferences('thumbnails')">Очистить старые</button>
+      </div>
+      <div class="text-xs text-dim mt-1">Можно загрузить до 16 PNG/JPG/WEBP. Перед другим выпуском старые референсы можно очистить.</div>
     </div>
     <div class="settings-panel">
       <div class="settings-panel-title">✍️ Референсы названий</div>
       <input id="fullRecapTitleRefs" type="file" accept="image/png,image/jpeg,image/webp" multiple class="form-input">
-      <button class="btn btn-secondary mt-2" onclick="uploadFullRecapReferences('titles','fullRecapTitleRefs')">Загрузить скриншоты названий</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-secondary" onclick="uploadFullRecapReferences('titles','fullRecapTitleRefs')">Загрузить скриншоты названий</button>
+        <button class="btn btn-ghost" onclick="clearFullRecapReferences('titles')">Очистить старые</button>
+      </div>
       <label class="form-label mt-3">Примеры названий текстом (необязательно)</label>
       <textarea id="fullRecapTitleReferenceText" class="form-input" rows="4" placeholder="Вставь сюда несколько названий, стиль которых нужно повторить."></textarea>
     </div>
