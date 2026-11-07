@@ -65,6 +65,7 @@ const FULL_RECAP_STEPS = [
   { id: 'tts', label: 'Voice', title: 'Generate One Complete Voice Track', subtitle: 'Choose a voice and synthesize the entire text in one request' },
   { id: 'full_timeline', label: 'Sync', title: 'Match Images to the Voice Track', subtitle: 'Use speech timestamps to arrange panels under the continuous audio' },
   { id: 'full_video', label: 'Export', title: 'Render the Complete Video', subtitle: 'Create one continuous MP4 with subtle motion and optional music' },
+  { id: 'full_package', label: 'YouTube', title: 'Generate Thumbnails & Titles', subtitle: 'Use your per-video references to create three covers and three title options' },
 ];
 
 // ─── Init ────────────────────────────────────────────────
@@ -310,6 +311,7 @@ function renderStepContent() {
     'tts': renderTTSStep,
     'full_timeline': renderFullRecapTimelineStep,
     'full_video': renderFullRecapVideoStep,
+    'full_package': renderFullRecapPackageStep,
     'video': renderVideoStep,
     'review_clips': renderReviewClipsStep,
     'sort_clips': renderSortClipsStep,
@@ -3514,6 +3516,7 @@ function renderFullRecapVideoStep() {
     <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
     <div class="step-actions-right">
       <button class="btn btn-primary" onclick="runFullRecapVideo()">🎬 Создать готовое видео</button>
+      <button class="btn btn-secondary" onclick="nextStep()">К обложкам и названиям →</button>
     </div>`;
   loadFullRecapData().then(data => {
     if (!data) return;
@@ -3535,6 +3538,156 @@ async function runFullRecapVideo() {
     bgm_volume: parseFloat(document.getElementById("fullRecapBgmVolume")?.value || "0.12"),
   };
   await startFullRecapStep("full_recap_video", settings);
+}
+
+
+let FULL_RECAP_PACKAGE_DATA = null;
+
+async function loadFullRecapPackageData() {
+  if (!APP.projectName) return null;
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/package`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось загрузить материалы оформления");
+    FULL_RECAP_PACKAGE_DATA = data;
+    return data;
+  } catch (error) {
+    console.error("[FullRecap] Package load failed:", error);
+    return null;
+  }
+}
+
+async function uploadFullRecapReferences(kind, inputId) {
+  const input = document.getElementById(inputId);
+  const files = Array.from(input?.files || []);
+  if (!files.length) return toast("Сначала выберите изображения.", "warning");
+  const body = new FormData();
+  files.forEach(file => body.append("files", file));
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/references/${kind}`, {
+      method: "POST", body,
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Загрузка не удалась");
+    toast(`Загружено референсов: ${data.files?.length || 0}`, "success");
+    input.value = "";
+    await loadFullRecapPackageData();
+    renderFullRecapPackagePreview();
+  } catch (error) {
+    toast("Ошибка загрузки референсов: " + error.message, "error");
+  }
+}
+
+function renderFullRecapPackagePreview() {
+  const el = document.getElementById("fullRecapPackagePreview");
+  if (!el) return;
+  const data = FULL_RECAP_PACKAGE_DATA || {};
+  const titles = data.titles || [];
+  const thumbs = data.thumbnails || [];
+  const thumbnailRefs = data.thumbnail_references || [];
+  const titleRefs = data.title_references || [];
+  el.innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">📌 Загруженные референсы</div>
+      <div class="text-xs text-dim">Референсы обложек: ${thumbnailRefs.length} · Референсы названий: ${titleRefs.length}</div>
+      <div class="text-xs text-dim mt-1">${thumbnailRefs.map(esc).join(", ") || "Обложки: пока нет"}<br>${titleRefs.map(esc).join(", ") || "Названия: пока нет"}</div>
+    </div>
+    ${titles.length ? `
+      <div class="settings-panel">
+        <div class="settings-panel-title">✍️ Три варианта названия</div>
+        ${titles.map((item,index)=>`
+          <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:8px;margin:8px 0;cursor:pointer;">
+            <input type="radio" name="fullRecapSelectedTitle" value="${index}" ${data.selected_title?.title === item.title ? "checked" : ""} onchange="selectFullRecapTitle(${index})" style="margin-top:4px;">
+            <span style="flex:1;">
+              <strong>${esc(item.title)}</strong>
+              <span class="text-xs text-dim" style="display:block;margin-top:4px;">Текст на обложке: ${esc(item.thumbnail_text || "")} · ${esc(item.angle || "")}</span>
+            </span>
+          </label>`).join("")}
+      </div>` : ""}
+    ${thumbs.length ? `
+      <div class="settings-panel">
+        <div class="settings-panel-title">🖼️ Варианты обложки</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;">
+          ${thumbs.map((item,index)=>`
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+              <img src="/api/full-recap/${encodeURIComponent(APP.projectName)}/thumbnails/${encodeURIComponent(item.filename)}" alt="Thumbnail ${index+1}" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;">
+              <div style="padding:10px;">
+                <strong>Обложка ${index+1}</strong>
+                <div class="text-xs text-dim">${esc(item.title || "")}</div>
+                <a href="/api/full-recap/${encodeURIComponent(APP.projectName)}/thumbnails/${encodeURIComponent(item.filename)}" download style="font-size:12px;">Сохранить JPG</a>
+              </div>
+            </div>`).join("")}
+        </div>
+      </div>` : ""}
+    ${data.status && data.status !== "ready" ? `<div class="text-xs text-dim mt-2">Статус: ${esc(data.status)}</div>` : ""}
+  `;
+}
+
+async function selectFullRecapTitle(index) {
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/package/selection`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось выбрать название");
+    await loadFullRecapPackageData();
+    toast("Название выбрано.", "success");
+  } catch (error) {
+    toast("Ошибка выбора названия: " + error.message, "error");
+  }
+}
+
+function renderFullRecapPackageStep() {
+  document.getElementById("stepBody").innerHTML = `
+    <p class="text-sm text-dim mb-3">Здесь добавляются референсы именно для этого выпуска. Приложение использует скриншоты обложек как визуальное направление, а скриншоты названий — как примеры структуры и подачи.</p>
+    <div class="settings-panel">
+      <div class="settings-panel-title">🖼️ Референсы обложек</div>
+      <input id="fullRecapThumbnailRefs" type="file" accept="image/png,image/jpeg,image/webp" multiple class="form-input">
+      <button class="btn btn-secondary mt-2" onclick="uploadFullRecapReferences('thumbnails','fullRecapThumbnailRefs')">Загрузить референсы обложек</button>
+      <div class="text-xs text-dim mt-1">Можно загрузить до 16 PNG/JPG/WEBP. На каждую генерацию прикладываются актуальные референсы и выбранные панели главы.</div>
+    </div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">✍️ Референсы названий</div>
+      <input id="fullRecapTitleRefs" type="file" accept="image/png,image/jpeg,image/webp" multiple class="form-input">
+      <button class="btn btn-secondary mt-2" onclick="uploadFullRecapReferences('titles','fullRecapTitleRefs')">Загрузить скриншоты названий</button>
+      <label class="form-label mt-3">Примеры названий текстом (необязательно)</label>
+      <textarea id="fullRecapTitleReferenceText" class="form-input" rows="4" placeholder="Вставь сюда несколько названий, стиль которых нужно повторить."></textarea>
+    </div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">⚙️ Генератор изображений</div>
+      <label class="form-label">Модель</label>
+      <select id="fullRecapImageModel" class="form-select">
+        <option value="gpt-image-2.5-sunburst" selected>GPT Image 2.5 Sunburst — точнее работает с референсами</option>
+        <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare — быстрый вариант</option>
+      </select>
+      <div class="text-xs text-dim mt-1">Для генерации обложек нужен OPENAI_API_KEY в локальном файле .env. Ключ не отправляется в браузер и не сохраняется в GitHub.</div>
+    </div>
+    <div id="fullRecapPackagePreview" class="mt-2"></div>`;
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+    <div class="step-actions-right">
+      <button class="btn btn-secondary" onclick="runFullRecapPackage()">✨ Сгенерировать 3 обложки и 3 названия</button>
+      <button class="btn btn-primary" onclick="goHome()">Готово</button>
+    </div>`;
+  loadFullRecapPackageData().then(data => {
+    if (!data) return;
+    const select = document.getElementById("fullRecapImageModel");
+    const text = document.getElementById("fullRecapTitleReferenceText");
+    if (select && data.settings?.openai_image_model) select.value = data.settings.openai_image_model;
+    if (text && data.settings?.full_recap_title_reference_text) text.value = data.settings.full_recap_title_reference_text;
+    renderFullRecapPackagePreview();
+  });
+}
+
+async function runFullRecapPackage() {
+  const settings = {
+    pipeline_mode: "full_recap",
+    full_recap_title_reference_text: document.getElementById("fullRecapTitleReferenceText")?.value.trim() || "",
+    openai_image_model: document.getElementById("fullRecapImageModel")?.value || "gpt-image-2.5-sunburst",
+  };
+  await startFullRecapStep("full_recap_package", settings);
 }
 
 async function runFullRecapAudio() {
@@ -4535,6 +4688,7 @@ socket.on('step_complete', (data) => {
       if (data.step === 'full_recap_script') renderFullRecapScriptPreview();
       if (data.step === 'full_recap_timeline') renderFullRecapTimelinePreview();
       if (data.step === 'full_recap_video') renderFullRecapVideoPreview();
+      if (data.step === 'full_recap_package') loadFullRecapPackageData().then(() => renderFullRecapPackagePreview());
     });
     return;
   }
