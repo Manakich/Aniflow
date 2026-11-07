@@ -326,6 +326,9 @@ def get_full_recap(project_name):
             'tts_voice': state.settings.get('tts_voice', ''),
             'full_recap_text_model': state.settings.get('full_recap_text_model', ''),
             'full_recap_style': state.settings.get('full_recap_style', ''),
+            'full_recap_elevenlabs_model': state.settings.get(
+                'full_recap_elevenlabs_model', 'eleven_flash_v2_5'
+            ),
         },
     })
 
