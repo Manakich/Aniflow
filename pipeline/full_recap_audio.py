@@ -28,6 +28,7 @@ def generate_full_narration_audio(
     rate: str | None = None,
     pitch: str | None = None,
     speed: float = 1.0,
+    elevenlabs_model: str = "eleven_multilingual_v2",
     synthesize_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Send the whole script to the selected TTS engine exactly once.
@@ -49,6 +50,16 @@ def generate_full_narration_audio(
     elif engine == "edge":
         result = _edge_single_request(
             text, output_path, voice=voice, rate=rate, pitch=pitch
+        )
+    elif engine == "elevenlabs":
+        # The legacy wrapper defaults to a monolingual English model.
+        # Full Recap defaults to the multilingual model for Russian narration.
+        from pipeline.elevenlabs_tts import get_elevenlabs_tts
+        client = get_elevenlabs_tts()
+        if not client.available:
+            raise RuntimeError("ElevenLabs API key is not configured")
+        result = client.generate_speech(
+            text, output_path, voice=voice, model=elevenlabs_model
         )
     else:
         from pipeline.tts_engine import generate_speech
