@@ -18,10 +18,12 @@ def render_full_recap_video(
     custom_bg_path: str | None = None,
     animation_style: str = "auto",
     watermark_path: str | None = None,
+    bgm_path: str | None = None,
+    bgm_volume: float = 0.12,
     progress_callback=None,
 ) -> str:
     """Use the narration file as the master clock; never trim or time-stretch it."""
-    from moviepy import AudioFileClip, concatenate_videoclips
+    from moviepy import AudioFileClip, CompositeAudioClip, concatenate_audioclips, concatenate_videoclips
     from pipeline import compositor
 
     if not os.path.isfile(audio_path):
@@ -81,6 +83,7 @@ def render_full_recap_video(
     clips = []
     final = None
     video = None
+    bgm = None
     try:
         for index, (panel, start, end, motion) in enumerate(normalized):
             duration = end - start
@@ -131,6 +134,23 @@ def render_full_recap_video(
             video = video.with_duration(audio_duration)
 
         final = video.with_audio(narration).with_duration(audio_duration)
+
+        # Background music is optional and mixed underneath the single narration.
+        # It may loop, but the narration file itself is never modified or trimmed.
+        if bgm_path and os.path.isfile(bgm_path):
+            try:
+                bgm = AudioFileClip(bgm_path)
+                if bgm.duration > 0:
+                    if bgm.duration < audio_duration:
+                        loops = int(audio_duration / bgm.duration) + 1
+                        bgm = concatenate_audioclips([bgm] * loops)
+                    bgm = bgm.subclipped(0, audio_duration).with_volume_scaled(
+                        max(0.0, min(1.0, float(bgm_volume)))
+                    )
+                    final = final.with_audio(CompositeAudioClip([narration, bgm]))
+            except Exception as exc:
+                print(f"[FullRecapRenderer] Background music skipped: {exc}")
+
         out_dir = os.path.dirname(os.path.abspath(output_path))
         os.makedirs(out_dir, exist_ok=True)
         bitrate = {"low": "2000k", "medium": "5000k", "high": "8000k"}.get(
@@ -159,6 +179,11 @@ def render_full_recap_video(
         if video is not None:
             video.close()
         narration.close()
+        if bgm is not None:
+            try:
+                bgm.close()
+            except Exception:
+                pass
         for clip in clips:
             try:
                 clip.close()
