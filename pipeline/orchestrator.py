@@ -2994,8 +2994,16 @@ class Orchestrator:
             audio_duration = float(_get_audio_duration(state.full_recap_audio_path))
             if audio_duration <= 0:
                 raise ValueError("Не удалось определить длительность озвучки")
-            panel_ids = [
-                panel.get('panel_id') for panel in (state.full_recap_panels or state.panels)
+            filtered_panel_ids = [
+                panel.get('panel_id')
+                for scene in state.full_recap_panel_context
+                if scene.get('scene_id') != 'filter_summary'
+                for panel in scene.get('panels', [])
+                if panel.get('panel_id') is not None
+            ]
+            panel_ids = filtered_panel_ids or [
+                panel.get('panel_id')
+                for panel in (state.full_recap_panels or state.panels)
                 if panel.get('panel_id') is not None
             ]
             timeline = build_visual_timeline(
