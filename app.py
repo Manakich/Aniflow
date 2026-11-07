@@ -307,7 +307,10 @@ def get_full_recap(project_name):
         'video_path': state.full_recap_video_path,
         'titles': state.full_recap_titles,
         'selected_title': state.full_recap_selected_title,
-        'thumbnails': state.full_recap_thumbnails,
+        'thumbnails': [
+            {key: value for key, value in item.items() if key != 'path'}
+            for item in state.full_recap_thumbnails
+        ],
         'package_status': state.full_recap_package_status,
         'panel_count': len(state.panels),
         'settings': {
@@ -352,7 +355,10 @@ def get_full_recap_package(project_name):
             'status': state.full_recap_package_status,
             'titles': state.full_recap_titles,
             'selected_title': state.full_recap_selected_title,
-            'thumbnails': state.full_recap_thumbnails,
+            'thumbnails': [
+                {key: value for key, value in item.items() if key != 'path'}
+                for item in state.full_recap_thumbnails
+            ],
             'thumbnail_references': [
                 item['filename'] for item in list_reference_files(state.project_dir, 'thumbnails')
             ],
