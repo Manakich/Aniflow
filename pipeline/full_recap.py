@@ -250,6 +250,8 @@ def generate_full_recap_script(
     known_ids: dict[str, Any] = {}
     context_lines: list[str] = []
     for scene in scene_contexts:
+        if scene.get("scene_id") == "filter_summary":
+            continue
         context_lines.append(f"\n[{scene.get('scene_id', 'scene')}]")
         for panel in scene.get("panels", []):
             panel_id = panel.get("panel_id")
