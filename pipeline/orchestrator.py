@@ -2801,15 +2801,16 @@ class Orchestrator:
     # ─── Full Recap Studio (one full script + one audio track) ─────────
 
     def step_full_recap_script(self, state):
-        """Analyse clean art panels and generate one continuous Russian script."""
+        """Generate one continuous Russian recap script for one or many chapters."""
         if not state.panels:
             state.error = "Сначала подготовьте и проверьте изображения (Crop 2)."
             state.save()
             return state
+        first_chapter = min(state.chapter_list) if state.is_batch and state.chapter_list else state.current_chapter
         try:
-            self._emit_progress('full_recap_script', 0, len(state.panels),
-                                "Анализ изображений для цельного пересказа…")
-            from pipeline.full_recap import build_panel_context, generate_full_recap_script
+            from pipeline.full_recap import (
+                build_panel_context, generate_full_recap_script, merge_chapter_panels
+            )
             s = state.settings
             backend = self.narrator.transport
             vision_model = getattr(self.narrator, 'vision_model', None) or config.VISION_MODEL
@@ -2821,9 +2822,47 @@ class Orchestrator:
             except Exception:
                 pass
 
+            chapter_entries = []
+            chapters = list(state.chapter_list) if state.is_batch and len(state.chapter_list) > 1 else [state.current_chapter]
+            total_panels = 0
+
+            # Gather already prepared art panels from every selected chapter.
+            # Each chapter-qualified synthetic panel ID prevents collisions when
+            # panel_00001 exists in several chapters.
+            for chapter_index, chapter_number in enumerate(chapters, start=1):
+                if self._should_cancel:
+                    raise InterruptedError("Подготовка пересказа отменена")
+                if state.is_batch and len(state.chapter_list) > 1:
+                    state.switch_to_chapter(chapter_number)
+
+                if not state.panels:
+                    raise ValueError(
+                        f"В главе {chapter_number} нет подготовленных изображений. "
+                        "Сначала выполните Crop 2 для всех выбранных глав."
+                    )
+
+                chapter_entries.append((chapter_number, [dict(panel) for panel in state.panels]))
+                total_panels += len(state.panels)
+                self._emit_progress(
+                    'full_recap_script', chapter_index, len(chapters),
+                    f"Подготовка главы {chapter_number}: {len(state.panels)} изображений"
+                )
+
+            all_panels = merge_chapter_panels(chapter_entries)
+            if not all_panels:
+                raise ValueError("Не найдено изображений для пересказа.")
+
+            # Keep a stable project-level location in the first selected chapter.
+            if state.is_batch and len(state.chapter_list) > 1 and state.current_chapter != first_chapter:
+                state.switch_to_chapter(first_chapter)
+
             cast_characters = self._load_cast_characters(state)
+            self._emit_progress(
+                'full_recap_script', 0, total_panels,
+                f"Анализ {len(chapters)} глав ({total_panels} изображений) для цельного пересказа…"
+            )
             context = build_panel_context(
-                state.panels, backend, vision_model,
+                all_panels, backend, vision_model,
                 scene_size=int(s.get('full_recap_scene_size', 5)),
                 cancel_check=lambda: self._should_cancel,
                 progress_callback=lambda c, t, m: self._emit_progress(
@@ -2831,9 +2870,7 @@ class Orchestrator:
                 ),
             )
             if self._should_cancel:
-                state.error = "Генерация пересказа отменена."
-                state.save()
-                return state
+                raise InterruptedError("Генерация пересказа отменена.")
 
             result = generate_full_recap_script(
                 context, backend, text_model,
@@ -2844,22 +2881,42 @@ class Orchestrator:
                 ),
                 story_context=s.get('full_recap_story_context', ''),
             )
+            state.full_recap_panels = all_panels
             state.full_recap_panel_context = context
             state.full_recap_script = result['full_text']
             state.full_recap_visual_cues = result['visual_cues']
             state.full_recap_word_timestamps = []
             state.full_recap_timeline = {}
+            state.full_recap_audio_path = None
             state.full_recap_video_path = None
             state.full_recap_status = "script_ready"
+            state.full_recap_titles = []
+            state.full_recap_selected_title = None
+            state.full_recap_thumbnails = []
+            state.full_recap_package_status = "not_started"
             state.error = None
 
             recap_dir = os.path.join(state.project_dir, "full_recap")
             os.makedirs(recap_dir, exist_ok=True)
             with open(os.path.join(recap_dir, "recap_script.json"), "w", encoding="utf-8") as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
+                json.dump({
+                    **result,
+                    "chapters": chapters,
+                    "panel_count_before_filter": len(all_panels),
+                }, f, ensure_ascii=False, indent=2)
             state.save()
-            self._emit_progress('full_recap_script', 1, 1, "Цельный сценарий готов.")
+            self._emit_progress(
+                'full_recap_script', 1, 1,
+                f"Цельный сценарий готов: {len(chapters)} глав, {len(all_panels)} исходных изображений."
+            )
         except Exception as e:
+            # Batch work may have switched chapters. Persist project-level recap
+            # failure/status on the first selected chapter, not an arbitrary last one.
+            try:
+                if state.is_batch and state.chapter_list and state.current_chapter != first_chapter:
+                    state.switch_to_chapter(first_chapter)
+            except Exception:
+                pass
             state.error = str(e)
             state.full_recap_status = "script_failed"
             state.save()
