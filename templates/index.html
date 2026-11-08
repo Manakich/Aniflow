@@ -84,69 +84,8 @@
 
     <!-- Panel 2 · Mode selection -->
     <section class="panel panel-modes">
-      <h2 class="panel-heading">Pick how the story is told</h2>
+      <h2 class="panel-heading">Manhwa Recap Studio</h2>
       <div class="mode-selection">
-        <!-- Dialogue Recap -->
-        <div class="mode-card" onclick="selectMode('dialogue')" role="button" tabindex="0"
-             onkeydown="if (event.key==='Enter'||event.key===' ') { event.preventDefault(); selectMode('dialogue'); }">
-          <div class="mode-card-icon dialogue">
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <rect x="9" y="2.5" width="6" height="11" rx="3" fill="#1F4FD8"/>
-              <path d="M5.5 11a6.5 6.5 0 0 0 13 0" stroke="#1F4FD8" stroke-width="2" stroke-linecap="round"/>
-              <path d="M12 17.5V21M8.5 21h7" stroke="#1F4FD8" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </div>
-          <div class="mode-card-title">Dialogue recap</div>
-          <div class="mode-card-desc">
-            Keep speech bubbles visible. Extract dialogue text from panels and convert
-            it directly to audio — let the original lines speak for themselves.
-          </div>
-          <div class="mode-card-steps">
-            <span class="mode-step-tag">Load</span>
-            <span class="mode-step-tag">Stitch</span>
-            <span class="mode-step-tag">Detect</span>
-            <span class="mode-step-tag">Crop</span>
-            <span class="mode-step-tag">Extract text</span>
-            <span class="mode-step-tag">TTS</span>
-            <span class="mode-step-tag">Video</span>
-          </div>
-          <div class="mode-card-cta">Start building</div>
-        </div>
-
-        <!-- Narrated Recap -->
-        <div class="mode-card" onclick="selectMode('narrated')" role="button" tabindex="0"
-             onkeydown="if (event.key==='Enter'||event.key===' ') { event.preventDefault(); selectMode('narrated'); }">
-          <div class="mode-card-icon narrated">
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <g transform="rotate(-8 12 7)">
-                <rect x="2" y="4.8" width="20" height="4.4" rx="1" fill="#D7263D"/>
-                <rect x="5" y="4.8" width="2.6" height="4.4" fill="#FFFFFF"/>
-                <rect x="10" y="4.8" width="2.6" height="4.4" fill="#FFFFFF"/>
-                <rect x="15" y="4.8" width="2.6" height="4.4" fill="#FFFFFF"/>
-              </g>
-              <rect x="2" y="11" width="20" height="10" rx="2" fill="#D7263D"/>
-              <path d="M10 13.8l5.2 2.2-5.2 2.2z" fill="#FFFFFF"/>
-            </svg>
-          </div>
-          <div class="mode-card-title">Narrated recap</div>
-          <div class="mode-card-desc">
-            Remove speech bubbles for clean panels. AI narrates the story like a friend
-            recapping it for you — with Ollama, Gemini, or Claude.
-          </div>
-          <div class="mode-card-steps">
-            <span class="mode-step-tag">Load</span>
-            <span class="mode-step-tag">Stitch</span>
-            <span class="mode-step-tag">Detect</span>
-            <span class="mode-step-tag">Crop</span>
-            <span class="mode-step-tag">Extract</span>
-            <span class="mode-step-tag">Clean</span>
-            <span class="mode-step-tag">Narrate</span>
-            <span class="mode-step-tag">TTS</span>
-            <span class="mode-step-tag">Video</span>
-          </div>
-          <div class="mode-card-cta">Start building</div>
-        </div>
-
         <!-- Full Recap Studio -->
         <div class="mode-card" onclick="selectMode('full_recap')" role="button" tabindex="0"
              onkeydown="if (event.key==='Enter'||event.key===' ') { event.preventDefault(); selectMode('full_recap'); }">
@@ -159,18 +98,19 @@
           </div>
           <div class="mode-card-title">Full Recap Studio</div>
           <div class="mode-card-desc">
-            Generate one complete Russian story, synthesize one continuous voice track,
-            then automatically match every image to what the narrator is saying.
+            Enter a manga or manhwa link and get an original Russian recap script,
+            numbered art panels, a silent long-form video, three thumbnails and YouTube metadata.
           </div>
           <div class="mode-card-steps">
             <span class="mode-step-tag">Source</span>
-            <span class="mode-step-tag">Clean panels</span>
-            <span class="mode-step-tag">Full script</span>
-            <span class="mode-step-tag">One voice track</span>
-            <span class="mode-step-tag">Sync visuals</span>
-            <span class="mode-step-tag">MP4</span>
+            <span class="mode-step-tag">Download</span>
+            <span class="mode-step-tag">Existing Crop 2</span>
+            <span class="mode-step-tag">Russian script</span>
+            <span class="mode-step-tag">Numbered images</span>
+            <span class="mode-step-tag">Silent MP4</span>
+            <span class="mode-step-tag">3 thumbnails</span>
           </div>
-          <div class="mode-card-cta">Start Full Recap</div>
+          <div class="mode-card-cta">Start</div>
         </div>
       </div>
     </section>
