@@ -604,54 +604,6 @@ function collectSourceSettings() {
 }
 
 // ─── ⚡ Pipeline settings sync (voices ↔ engine, bg color, pre-fill) ──────
-let _allVoices = null;
-
-async function loadVoicesOnce() {
-  if (_allVoices) return _allVoices;
-  try {
-    const r = await fetch('/api/voices');
-    _allVoices = await r.json();
-  } catch (e) { _allVoices = []; }
-  return _allVoices;
-}
-
-function _prettyVoiceLabel(v) {
-  if (v.engine === 'edge') {
-    const pretty = (v.name || '').split('-').pop().replace('Neural', '').replace(/([a-z])([A-Z])/g, '$1 $2');
-    return pretty + (v.gender ? ` (${v.gender})` : '');
-  }
-  if (v.engine === 'kokoro' && v.style) return `${v.display_name || v.name} — ${v.style}`;
-  return v.display_name || v.name;
-}
-
-async function refreshVoiceOptions(engine, preferred) {
-  const sel = document.getElementById('settingTTSVoice');
-  if (!sel) return;
-  const voices = (await loadVoicesOnce()).filter(v => v.engine === engine);
-  if (voices.length === 0) {
-    sel.innerHTML = engine === 'elevenlabs'
-      ? '<option value="">⚠️ ElevenLabs: set your API key in settings first</option>'
-      : '<option value="">⚠️ No voices available for this engine</option>';
-    return;
-  }
-  sel.innerHTML = voices.map(v =>
-    `<option value="${esc(v.name)}">${esc(_prettyVoiceLabel(v))}</option>`).join('');
-  if (preferred && voices.some(v => v.name === preferred)) sel.value = preferred;
-  else {
-    const remembered = localStorage.getItem('ttsVoice_' + engine);
-    const fallbackDefault = engine === 'edge' ? 'en-US-ChristopherNeural' : null;
-    const fallbackOk = fallbackDefault && voices.some(v => v.name === fallbackDefault);
-    if (remembered && voices.some(v => v.name === remembered)) sel.value = remembered;
-    else if (fallbackOk) sel.value = fallbackDefault;
-    else sel.value = voices[0].name;
-  }
-}
-
-async function onTTSEngineChange(sel) {
-  localStorage.setItem('ttsEngine', sel.value);
-  await refreshVoiceOptions(sel.value, null);
-}
-
 function onBgModeChange(sel) {
   const custom = document.getElementById('bgCustomRow');
   const color = document.getElementById('bgColorRow');
@@ -666,8 +618,6 @@ function prefillSourceSettings(s) {
     const el = document.getElementById(id);
     if (el && val !== undefined && val !== null && val !== '') el.value = val;
   };
-  if (s.tts_engine) set('settingTTSEngine', s.tts_engine);
-  refreshVoiceOptions(document.getElementById('settingTTSEngine').value, s.tts_voice);
   set('settingResolution', s.video_resolution);
   set('settingFPS', s.video_fps);
   set('settingAnimation', s.animation_style);
@@ -2963,7 +2913,7 @@ function renderNarrationPreview(panels) {
     </div>`;
 }
 
-// ─── Step: TTS ──────────────────────────────────────────
+// ─── Full Recap data and workflow helpers ───────────────
 
 let FULL_RECAP_DATA = null;
 
@@ -3354,7 +3304,7 @@ async function selectFullRecapTitle(index) {
 
 function renderFullRecapPackageStep() {
   document.getElementById("stepBody").innerHTML = `
-    <p class="text-sm text-dim mb-3">Здесь добавляются референсы именно для этого выпуска. Приложение использует скриншоты обложек как визуальное направление, а скриншоты названий — как примеры структуры и подачи.</p>
+    <p class="text-sm text-dim mb-3">Встроенный стиль уже настроен по предоставленным примерам успешных каналов. Ничего загружать не обязательно. При желании можно добавить референсы именно этого выпуска — они будут дополнительными ориентирами, а не обязательным условием.</p>
     <div class="settings-panel">
       <div class="settings-panel-title">🖼️ Референсы обложек</div>
       <input id="fullRecapThumbnailRefs" type="file" accept="image/png,image/jpeg,image/webp" multiple class="form-input">
@@ -3362,7 +3312,7 @@ function renderFullRecapPackageStep() {
         <button class="btn btn-secondary" onclick="uploadFullRecapReferences('thumbnails','fullRecapThumbnailRefs')">Загрузить референсы обложек</button>
         <button class="btn btn-ghost" onclick="clearFullRecapReferences('thumbnails')">Очистить старые</button>
       </div>
-      <div class="text-xs text-dim mt-1">Можно загрузить до 16 PNG/JPG/WEBP. Перед другим выпуском старые референсы можно очистить.</div>
+      <div class="text-xs text-dim mt-1">Необязательно. До 16 PNG/JPG/WEBP; добавленные изображения уточняют стиль только этого выпуска.</div>
     </div>
     <div class="settings-panel">
       <div class="settings-panel-title">✍️ Референсы названий</div>
@@ -3373,16 +3323,16 @@ function renderFullRecapPackageStep() {
       </div>
       <label class="form-label mt-3">Примеры названий текстом</label>
       <textarea id="fullRecapTitleReferenceText" class="form-input" rows="4" placeholder="Вставь сюда несколько названий, стиль которых нужно использовать как ориентир."></textarea>
-      <div class="text-xs text-dim mt-1">Для генерации обязательно нужен хотя бы один референс названия: скриншоты выше или примеры в этом поле.</div>
+      <div class="text-xs text-dim mt-1">Необязательно. Встроенный профиль названий используется автоматически; текстовые примеры могут дополнить его для этого выпуска.</div>
     </div>
     <div class="settings-panel">
-      <div class="settings-panel-title">⚙️ Генератор изображений</div>
+      <div class="settings-panel-title">⚙️ Генерация превью</div>
       <label class="form-label">Модель</label>
       <select id="fullRecapImageModel" class="form-select">
         <option value="gpt-image-2.5-sunburst" selected>GPT Image 2.5 Sunburst — точнее работает с референсами</option>
         <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare — быстрый вариант</option>
       </select>
-      <div class="text-xs text-dim mt-1">Для генерации обложек нужен OPENAI_API_KEY в локальном файле .env. Ключ не отправляется в браузер и не сохраняется в GitHub.</div>
+      <div class="text-xs text-dim mt-1">Для создания трёх превью нужен OPENAI_API_KEY в локальном файле .env. Ключ не отправляется в браузер и не сохраняется в GitHub.</div>
     </div>
     <div id="fullRecapPackagePreview" class="mt-2"></div>`;
   document.getElementById("stepActions").innerHTML = `
@@ -3402,20 +3352,11 @@ function renderFullRecapPackageStep() {
 }
 
 async function runFullRecapPackage() {
-  const packageData = await loadFullRecapPackageData();
   const titleText = document.getElementById("fullRecapTitleReferenceText")?.value.trim() || "";
-  const titleRefs = packageData?.title_references || [];
-  const thumbnailRefs = packageData?.thumbnail_references || [];
-  if (!titleRefs.length && !titleText) {
-    return toast("Для названий добавь скриншот референса или примеры текстом.", "warning");
-  }
-  if (!thumbnailRefs.length) {
-    return toast("Загрузи хотя бы один референс обложки.", "warning");
-  }
   const settings = {
     pipeline_mode: "full_recap",
     full_recap_title_reference_text: titleText,
-    openai_image_model: document.getElementById("fullRecapImageModel")?.value || "gpt-image-2",
+    openai_image_model: document.getElementById("fullRecapImageModel")?.value || "gpt-image-2.5-sunburst",
   };
   await startFullRecapStep("full_recap_package", settings);
 }
