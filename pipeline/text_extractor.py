@@ -329,7 +329,7 @@ def _manga_ocr(image_path: str) -> str:
     return _mocr(image_path)
 
 
-def _parse_vision_respdef _parse_vision_response(raw: str) -> tuple[str, str]:
+def _parse_vision_response(raw: str) -> tuple[str, str]:
     """Parse structured TEXT and Russian VISUAL sections from one vision request."""
     raw = (raw or "").strip()
     if not raw:
