@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#E3E5E1">
-<title>Manhwa Recap Studio</title>
-<meta name="description" content="Manhwa Recap Studio — Russian manga and manhwa recap scripts, numbered panels, silent long-form videos and YouTube packaging.">
+<title>Recap Studio — пересказы манги и манхвы</title>
+<meta name="description" content="Recap Studio — Russian manga and manhwa recap scripts, numbered panels, silent long-form videos and YouTube packaging.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,weight@12..96,600;12..96,700;12..96,800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
@@ -21,7 +21,7 @@
     <div class="app-logo">
       <img src="/static/logo-small.jpg?v=2" alt="AniFlow logo" width="38" height="38"
            onerror="if (!this.dataset.fallback) { this.dataset.fallback = 1; this.src = '/static/logo-small.png?v=2'; }">
-      <span class="app-logo-text">Manhwa Recap Studio</span>
+      <span class="app-logo-text">Recap Studio</span>
     </div>
     <div class="header-status" aria-label="Service status">
       <div class="status-dot"><div class="dot" id="dotOllama"></div> Ollama</div>
@@ -82,7 +82,7 @@
 
     <!-- Panel 2 · Mode selection -->
     <section class="panel panel-modes">
-      <h2 class="panel-heading">Manhwa Recap Studio</h2>
+      <h2 class="panel-heading">Recap Studio</h2>
       <div class="mode-selection">
         <!-- Full Recap Studio -->
         <div class="mode-card" onclick="selectMode('full_recap')" role="button" tabindex="0"
@@ -96,26 +96,26 @@
           </div>
           <div class="mode-card-title">Full Recap Studio</div>
           <div class="mode-card-desc">
-            Enter a manga or manhwa link and get an original Russian recap script,
-            numbered art panels, a silent long-form video, three thumbnails and YouTube metadata.
+            Вставьте ссылку на мангу или манхву и получите оригинальный русский пересказ,
+            нумерованные кадры, немое видео и материалы для публикации на YouTube.
           </div>
           <div class="mode-card-steps">
-            <span class="mode-step-tag">Source</span>
-            <span class="mode-step-tag">Download</span>
-            <span class="mode-step-tag">Existing Crop 2</span>
-            <span class="mode-step-tag">Russian script</span>
-            <span class="mode-step-tag">Numbered images</span>
-            <span class="mode-step-tag">Silent MP4</span>
-            <span class="mode-step-tag">3 thumbnails</span>
+            <span class="mode-step-tag">Ссылка</span>
+            <span class="mode-step-tag">Загрузка</span>
+            <span class="mode-step-tag">Готовые кадры</span>
+            <span class="mode-step-tag">Пересказ</span>
+            <span class="mode-step-tag">Нумерация</span>
+            <span class="mode-step-tag">Немое видео</span>
+            <span class="mode-step-tag">3 превью</span>
           </div>
-          <div class="mode-card-cta">Start</div>
+          <div class="mode-card-cta">Начать</div>
         </div>
       </div>
     </section>
 
     <!-- Panel 3 · Recent projects -->
     <section class="panel panel-projects">
-      <h2 class="panel-heading">Recent projects</h2>
+      <h2 class="panel-heading">Недавние проекты</h2>
       <div class="projects-grid" id="projectsGrid">
         <div class="empty-state" style="grid-column:1/-1">
           <div class="empty-state-icon">
@@ -123,7 +123,7 @@
               <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="#1B1C1F" stroke-width="1.6" stroke-linejoin="round"/>
             </svg>
           </div>
-          <div class="empty-state-text">Nothing on the desk yet. Pick a style above and start your first strip.</div>
+          <div class="empty-state-text">Здесь появятся созданные вами проекты.</div>
         </div>
       </div>
     </section>
@@ -132,7 +132,7 @@
 
   <!-- ═══════════ VIEW: Wizard ═══════════ -->
   <div id="viewWizard" class="hidden">
-    <button class="back-link" type="button" onclick="goHome()">Back to home</button>
+    <button class="back-link" type="button" onclick="goHome()">На главную</button>
 
     <!-- Step Indicator -->
     <div class="step-indicator" id="stepIndicator"></div>
