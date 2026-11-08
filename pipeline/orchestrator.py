@@ -2218,6 +2218,66 @@ class Orchestrator:
             state.save()
         return state
 
+    def step_full_recap_prepare(self, state):
+        """Run AniFlow's existing panel/OCR pipeline once as one internal task.
+
+        Each underlying step has its own cache / smart-resume checks. When
+        Crop 2 or dialogue extraction already exists, it reuses those files
+        instead of cropping or reading the same chapter again.
+        """
+        pipeline_steps = [
+            ("Сшивка страниц", self.step_stitch),
+            ("Обнаружение областей с текстом", self.step_detect_bubble_text),
+            ("Подготовка контекстных панелей", self.step_crop_bubble_text_panels),
+            ("Сборка страниц для анализа", self.step_stitch_bubble_panels),
+            ("Обнаружение чистых кадров манги", self.step_detect_art_panels),
+            ("Извлечение готовых кадров (Crop 2)", self.step_crop_art_panels),
+            ("Извлечение текста и описаний сцен", self.step_extract_dialogue_text),
+        ]
+
+        state.error = None
+        state.full_recap_status = "preparing"
+        state.save()
+
+        for index, (label, step_function) in enumerate(pipeline_steps, start=1):
+            if self._should_cancel:
+                state.error = "Подготовка изображений отменена."
+                state.full_recap_status = "prepare_cancelled"
+                state.save()
+                return state
+
+            self._emit_progress(
+                "full_recap_prepare", index - 1, len(pipeline_steps),
+                f"{label} ({index}/{len(pipeline_steps)})…"
+            )
+
+            try:
+                state = step_function(state)
+            except Exception as exc:
+                state.error = f"{label}: {exc}"
+                state.full_recap_status = "prepare_failed"
+                state.save()
+                return state
+
+            if state.error:
+                state.error = f"{label}: {state.error}"
+                state.full_recap_status = "prepare_failed"
+                state.save()
+                return state
+
+        if state.is_batch and len(state.chapter_list) > 1:
+            self._reset_viewing_to_first_chapter(state)
+
+        state.full_recap_status = "panels_ready"
+        state.error = None
+        state.save()
+        self._emit_progress(
+            "full_recap_prepare", len(pipeline_steps), len(pipeline_steps),
+            f"Готово: {len(state.chapter_list) if state.is_batch else 1} глава(ы), "
+            "кадры и текстовый контекст подготовлены."
+        )
+        return state
+
     def step_full_recap_script(self, state):
         """Write one long recap from panels already produced by AniFlow Crop 2."""
         if not state.panels and not (state.is_batch and len(state.chapter_list) > 1):
