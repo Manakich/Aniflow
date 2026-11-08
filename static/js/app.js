@@ -723,20 +723,6 @@ function prefillSourceSettings(s) {
   if (s.fast_mode) setSpeedSettings(s);
 }
 
-function browseSourceFile() {
-  fetch('/api/browse-source-file', { method: 'POST' })
-    .then(r => r.json())
-    .then(data => {
-      if (data.path) {
-        const el = document.getElementById('inputSourceFolder');
-        if (el) el.value = data.path;
-      } else if (data.error) {
-        toast(data.error, 'error');
-      }
-    })
-    .catch(e => toast('File browser failed: ' + e.message, 'error'));
-}
-
 function browseFileFor(targetId) {
   fetch('/api/browse-file', { method: 'POST' })
     .then(r => r.json())
