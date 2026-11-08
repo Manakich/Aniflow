@@ -378,7 +378,7 @@ def _parse_vision_respdef _parse_vision_response(raw: str) -> tuple[str, str]:
     return "\n".join(text_lines), visual_part
 
 
-═════════════════════════════════════════════════
+# ═════════════════════════════════════════════════
 # Model resolution
 # ═══════════════════════════════════════════════════════════════════
 
