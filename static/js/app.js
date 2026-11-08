@@ -420,9 +420,9 @@ socket.on('step_complete', function _handleDownload(data) {
         
         ${downloaded.length > 1 ? `
           <div style="padding:12px; background:var(--blue-tint); border:1px solid var(--blue); border-radius:6px; margin-bottom:12px;">
-            <div style="font-size:12px; font-weight:700; color:var(--blue); margin-bottom:4px;">🎯 Batch mode is on</div>
+            <div style="font-size:12px; font-weight:700; color:var(--blue); margin-bottom:4px;">📚 Выбрано несколько глав</div>
             <div style="font-size:11px; color:var(--ink-soft);">
-              You downloaded multiple chapters! Use chapter navigation (← →) to switch between them during processing.
+              Все выбранные главы будут включены в один общий пересказ и видеоряд.
             </div>
           </div>
         ` : ''}
@@ -442,6 +442,7 @@ socket.on('step_complete', function _handleDownload(data) {
     // Downloading the selected range is enough; original AniFlow handles every
     // chapter in the root folder during its existing load/stitch/Crop 2 pipeline.
     startSource();
+  }
 });
 
 // When user picks a different downloaded chapter from the dropdown
