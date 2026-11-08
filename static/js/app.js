@@ -331,260 +331,26 @@ const SCRAPER = {
 function renderSourceStep() {
   const body = document.getElementById('stepBody');
   body.innerHTML = `
-    <div id="chapterNavSlot">${renderChapterNavigation()}</div>
-    
-    <!-- Manhwa Downloader -->
-    <div class="settings-panel" style="margin-top:0; margin-bottom:18px;">
-      <div class="settings-panel-title">📥 Download Manhwa</div>
+    <div class="settings-panel" style="margin-top:0;">
+      <div class="settings-panel-title">📚 Ссылка на мангу или манхву</div>
       <div class="form-group">
-        <label class="form-label">Manhwa URL</label>
-        <div style="display:flex; gap:8px;">
+        <label class="form-label">URL страницы тайтла</label>
+        <div style="display:flex;gap:8px;">
           <input type="text" class="form-input" id="inputMangaUrl" style="flex:1"
-                 placeholder="https://manhuaus.com/manga/solo-leveling/" value="${esc(APP._lastUrl || '')}">
-          <button class="btn btn-secondary" onclick="analyzeUrl()" id="btnAnalyze">🔍 Analyze</button>
+                 placeholder="Вставьте ссылку на страницу манги/манхвы"
+                 value="${esc(APP._lastUrl || '')}">
+          <button class="btn btn-primary" onclick="analyzeUrl()" id="btnAnalyze">Найти главы</button>
         </div>
-        <div class="text-xs text-dim mt-1">Supports MangaDex, Manhuaus, Manhwatop, and similar sites</div>
+        <div class="text-xs text-dim mt-2">Приложение проверит доступные главы. После выбора диапазона оно скачает страницы и запустит штатную обработку AniFlow один раз.</div>
       </div>
-
-      <!-- Analyze results -->
       <div id="analyzeResult"></div>
     </div>
+    <input type="hidden" id="inputProjectName" value="${esc(APP.projectName || '')}">
+    <input type="hidden" id="inputSourceFolder" value="${esc(APP.sourceFolder || '')}">`;
 
-    <div class="divider" style="position:relative; text-align:center;">
-      <span style="background:var(--bg-card); padding:0 12px; position:relative; z-index:1; color:var(--text-dim); font-size:12px; font-weight:600;">Or use a local folder</span>
-    </div>
-
-    <div class="form-group" style="margin-top:16px;">
-      <label class="form-label">Project Name</label>
-      <input type="text" class="form-input" id="inputProjectName"
-             placeholder="e.g. Solo Leveling" value="${esc(APP.projectName)}">
-    </div>
-    
-    <!-- BATCH MODE TOGGLE -->
-    <div class="form-group" style="margin-top:20px; padding:16px; background:var(--blue-tint); border:2px solid var(--blue); border-radius:8px;">
-      <label class="form-label" style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
-        <span style="font-size:16px;">🔄</span>
-        <span style="font-weight:700;">Processing Mode</span>
-      </label>
-      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <label class="radio-option" style="flex:1; cursor:pointer; padding:12px; border-radius:6px;" onclick="setBatchMode(false)">
-          <input type="radio" name="batchMode" value="single" checked style="margin-right:8px;">
-          <div style="display:inline-block;">
-            <strong>📄 Single Chapter</strong>
-            <div style="font-size:11px; color:var(--text-dim); margin-top:2px;">Process one chapter at a time</div>
-          </div>
-        </label>
-        <label class="radio-option" style="flex:1; cursor:pointer; padding:12px; border-radius:6px;" onclick="setBatchMode(true)">
-          <input type="radio" name="batchMode" value="batch" style="margin-right:8px;">
-          <div style="display:inline-block;">
-            <strong>📚 Batch Mode</strong>
-            <div style="font-size:11px; color:var(--text-dim); margin-top:2px;">Process multiple chapters at once</div>
-          </div>
-        </label>
-      </div>
-      <div id="batchModeHint" style="margin-top:12px; padding:10px; background:var(--paper); border:1.5px solid var(--blue); border-radius:6px; font-size:12px; color:var(--ink); display:none;">
-        💡 <strong>Batch Mode:</strong> Download multiple chapters (e.g., 1-5) and process them all together. You'll be able to switch between chapters to review each one's results.
-      </div>
-    </div>
-    
-    <div class="form-group">
-      <label class="form-label">Chapter Folder Path</label>
-      <div style="display:flex; gap:8px;">
-        <input type="text" class="form-input" id="inputSourceFolder" style="flex:1"
-               placeholder="/path/to/chapter/images" value="${esc(APP.sourceFolder)}">
-        <button class="btn btn-secondary" onclick="browseFolderForSource()" style="white-space:nowrap;">
-          📁 Browse folder
-        </button>
-        <button class="btn btn-secondary" onclick="browseSourceFile()" style="white-space:nowrap;">
-          🗜️ Archive / PDF
-        </button>
-      </div>
-      <div class="text-xs text-dim mt-1">Folder with page images, or one ZIP/CBZ/PDF/image file</div>
-    </div>
-
-    <div class="settings-panel">
-      <div class="settings-panel-title">⚙️ Pipeline Settings</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">TTS Engine</label>
-          <select class="form-select" id="settingTTSEngine" onchange="onTTSEngineChange(this)">
-            <option value="edge" selected>Edge TTS (free)</option>
-            <option value="kokoro">Kokoro TTS (local)</option>
-            <option value="elevenlabs">ElevenLabs (premium)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">TTS Voice</label>
-          <select class="form-select" id="settingTTSVoice" onchange="localStorage.setItem('ttsVoice_' + document.getElementById('settingTTSEngine').value, this.value)">
-            <option value="">Loading voices…</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Video Resolution</label>
-          <select class="form-select" id="settingResolution">
-            <optgroup label="Landscape (16:9) - YouTube">
-              <option value="1080p_landscape" selected>1920x1080 (1080p Landscape)</option>
-              <option value="2k_landscape">2560x1440 (2K Landscape)</option>
-              <option value="4k_landscape">3840x2160 (4K Landscape)</option>
-            </optgroup>
-            <optgroup label="Portrait (9:16) - Shorts/Reels">
-              <option value="1080p">1080x1920 (1080p Portrait)</option>
-              <option value="2k">1440x2560 (2K Portrait)</option>
-              <option value="4k">2160x3840 (4K Portrait)</option>
-            </optgroup>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Video FPS</label>
-          <select class="form-select" id="settingFPS">
-            <option value="30">30 FPS</option>
-            <option value="60">60 FPS</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Animation Style</label>
-          <select class="form-select" id="settingAnimation">
-            <option value="auto" selected>Auto (varied)</option>
-            <option value="none">None (static)</option>
-            <option value="random">Random</option>
-            <option value="zoom_in">Zoom in</option>
-            <option value="zoom_out">Zoom out</option>
-            <option value="slide_left">Pan left</option>
-            <option value="slide_right">Pan right</option>
-            <option value="slide_up">Pan up</option>
-            <option value="slide_down">Pan down</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Background Mode</label>
-          <select class="form-select" id="settingBgMode" onchange="onBgModeChange(this)">
-            <option value="blur" selected>Blurred panel (auto-fill)</option>
-            <option value="color">Solid color</option>
-            <option value="blur_color">Blurred + color overlay</option>
-            <option value="custom">Custom image / video</option>
-          </select>
-        </div>
-        <div class="form-group" id="bgColorRow" style="display:none;">
-          <label class="form-label">Background Color & Opacity</label>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <input type="color" id="settingBgColor" value="#0a0a0f" style="width:44px; height:36px; border:none; background:none; cursor:pointer; padding:0;">
-            <input type="range" id="settingBgOpacity" min="0" max="100" value="50" style="flex:1; accent-color:var(--amber);" oninput="document.getElementById('bgOpacityVal').textContent = this.value + '%'">
-            <span id="bgOpacityVal" class="text-xs text-dim" style="width:40px;">50%</span>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Video Quality</label>
-          <select class="form-select" id="settingQuality">
-            <option value="low">Low (small file)</option>
-            <option value="medium" selected>Medium</option>
-            <option value="high">High (large file)</option>
-          </select>
-        </div>
-        <div class="form-group" id="bgCustomRow" style="display:none; grid-column: 1 / -1;">
-          <label class="form-label">Custom Background (image, or video — video needs Speed Mode)</label>
-          <div style="display:flex; gap:8px;">
-            <input class="form-select" id="settingCustomBg" placeholder="/path/to/background.jpg or .mp4">
-            <button class="btn btn-secondary" style="padding:8px 14px;" onclick="browseFileFor('settingCustomBg')">📁</button>
-          </div>
-          <div class="text-xs text-dim" style="margin-top:4px;">Video backgrounds loop under the panel (panel motion is static in this mode)</div>
-        </div>
-        <div class="form-group" style="grid-column: 1 / -1;">
-          <label class="form-label">Watermark (optional)</label>
-          <div style="display:flex; gap:8px;">
-            <input class="form-select" id="settingWatermark" placeholder="/path/to/logo.png (leave empty for none)">
-            <button class="btn btn-secondary" style="padding:8px 14px;" onclick="browseFileFor('settingWatermark')">📁</button>
-          </div>
-        </div>
-        <div class="form-group" style="grid-column: 1 / -1;">
-          <label class="form-label">⚡ Speed Mode</label>
-          <label style="display:flex; align-items:flex-start; gap:10px; padding:12px; background:var(--amber-tint); border:1px solid var(--amber); border-radius:6px; cursor:pointer;">
-            <input type="checkbox" id="settingSpeedMode" ${localStorage.getItem('speedMode') === 'true' ? 'checked' : ''} onchange="toggleSpeedOptions(this)" style="margin-top:2px; width:16px; height:16px; accent-color:var(--amber);">
-            <span style="font-size:12px; line-height:1.5; color:var(--ink-soft);">
-              <strong style="color:var(--amber);">Faster rendering</strong> — hardware video encoder, parallel clip generation, concurrent TTS for all engines, and faster AI narration. Turn <strong>OFF</strong> for the classic behavior. Output files are the same.
-            </span>
-          </label>
-          <div id="speedOptionsPanel" style="display:${localStorage.getItem('speedMode') === 'true' ? 'block' : 'none'}; margin-top:10px; padding:14px; background:var(--paper-tint); border:1px solid var(--amber); border-radius:6px;">
-            <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:10px;">⚙️ Speed settings for your hardware</div>
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
-              <select id="speedPresetSelect" class="form-select" style="max-width:260px;" onchange="applySpeedPreset(this.value)">
-                <option value="custom">Custom</option>
-                <option value="builtin:low">🖥️ Low-End PC</option>
-                <option value="builtin:balanced">⚖️ Balanced (recommended)</option>
-                <option value="builtin:high">🚀 High-End PC</option>
-              </select>
-              <input id="speedPresetName" class="form-select" style="max-width:150px;" placeholder="Preset name">
-              <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="saveSpeedPreset()">💾 Save</button>
-              <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="deleteSpeedPreset()" title="Delete selected custom preset">🗑️</button>
-              <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="resetSpeedDefaults()" title="Back to balanced defaults">↺ Reset</button>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px 16px;">
-              <div>
-                <label class="form-label" style="font-size:12px;">Clip workers (parallel encodes)</label>
-                <input type="number" id="speedClipWorkers" class="form-select" min="1" max="16" value="4">
-                <div class="text-xs text-dim" style="margin-top:2px;">More = faster, uses more CPU/RAM. Low-end: 2 · High-end: 6+</div>
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">Video encoder</label>
-                <select id="speedEncoder" class="form-select">
-                  <option value="auto" selected>Auto (best available)</option>
-                  <option value="videotoolbox">Hardware (Apple VideoToolbox)</option>
-                  <option value="libx264">Software (libx264 fast)</option>
-                </select>
-                <div class="text-xs text-dim" id="speedEncoderHint" style="margin-top:2px;">Auto picks hardware when available</div>
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">Edge TTS parallel requests</label>
-                <input type="number" id="speedEdgeWorkers" class="form-select" min="1" max="12" value="6">
-                <div class="text-xs text-dim" style="margin-top:2px;">Free service — 4–8 is safe</div>
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">ElevenLabs parallel requests</label>
-                <input type="number" id="speedELWorkers" class="form-select" min="1" max="4" value="2">
-                <div class="text-xs text-dim" style="margin-top:2px;">Keep low — paid API rate limits</div>
-              </div>
-              <div style="grid-column: 1 / -1;">
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                  <input type="checkbox" id="speedKokoroGPU" checked style="width:15px; height:15px; accent-color:var(--amber);">
-                  <span style="font-size:12px; color:var(--ink-soft);">Kokoro TTS on GPU (Apple MPS) — falls back to CPU automatically</span>
-                </label>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>`;
-
-  const actions = document.getElementById('stepActions');
-  actions.innerHTML = `
-    <div></div>
-    <div class="step-actions-right">
-      <button class="btn" style="background:var(--amber); color:#fff; font-weight:700;" onclick="runFullBatchFromSource()" title="Load + run every step on ALL chapters automatically">🚀 Run Full Batch</button>
-      <button class="btn btn-primary" onclick="startSource()">Load Chapter</button>
-    </div>`;
-
-  // Re-render analyze results if we already have them
-  if (SCRAPER.mangaInfo) {
-    renderAnalyzeResult(SCRAPER.mangaInfo);
-  }
-
-  // Fill Speed Mode defaults from the actual hardware (once per session)
-  if (localStorage.getItem('speedMode') === 'true') {
-    initSpeedPanel();
-  }
-
-  // ✅ SYNC: restore engine/voice (remembered choice, or the open project's
-  // saved settings) and pre-fill every field from the saved project
-  const engineSel = document.getElementById('settingTTSEngine');
-  const pSettings = (APP.projectData && APP.projectData.settings) || null;
-  if (engineSel) {
-    engineSel.value = (pSettings && pSettings.tts_engine) || localStorage.getItem('ttsEngine') || 'edge';
-  }
-  refreshVoiceOptions(
-    engineSel ? engineSel.value : 'edge',
-    (pSettings && pSettings.tts_voice) || localStorage.getItem('ttsVoice_' + (engineSel ? engineSel.value : 'edge')));
-  if (pSettings) prefillSourceSettings(pSettings);
+  document.getElementById('stepActions').innerHTML = `
+    <div class="text-xs text-dim">После скачивания главы приложение продолжит обработку автоматически.</div>`;
+  if (SCRAPER.mangaInfo) renderAnalyzeResult(SCRAPER.mangaInfo);
 }
 
 async function analyzeUrl() {
@@ -879,22 +645,13 @@ async function browseFolderForSource() {
 }
 
 function collectSourceSettings() {
-  const opacityEl = document.getElementById('settingBgOpacity');
   return {
-    pipeline_mode: APP.mode || 'dialogue',
-    tts_engine: document.getElementById('settingTTSEngine').value,
-    tts_voice: document.getElementById('settingTTSVoice').value,
-    video_resolution: document.getElementById('settingResolution').value,
-    video_fps: parseInt(document.getElementById('settingFPS').value),
-    video_quality: document.getElementById('settingQuality') ? document.getElementById('settingQuality').value : 'medium',
-    animation_style: document.getElementById('settingAnimation') ? document.getElementById('settingAnimation').value : 'auto',
-    bg_mode: document.getElementById('settingBgMode') ? document.getElementById('settingBgMode').value : 'blur',
-    bg_color: document.getElementById('settingBgColor') ? document.getElementById('settingBgColor').value : '#0a0a0f',
-    color_opacity: opacityEl ? parseInt(opacityEl.value, 10) / 100 : 0.5,
-    custom_bg_path: document.getElementById('settingCustomBg') ? document.getElementById('settingCustomBg').value.trim() : '',
-    watermark_path: document.getElementById('settingWatermark') ? document.getElementById('settingWatermark').value.trim() : '',
-    fast_mode: !!(document.getElementById('settingSpeedMode') && document.getElementById('settingSpeedMode').checked),
-    ...getSpeedSettings(),
+    pipeline_mode: 'full_recap',
+    video_resolution: '1080p_landscape',
+    video_fps: 30,
+    video_quality: 'medium',
+    animation_style: 'auto',
+    full_recap_target_words: 5000,
   };
 }
 
