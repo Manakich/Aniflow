@@ -11,7 +11,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # When True (user enables "Speed Mode"), the pipeline switches to:
 #   - VideoToolbox hardware H.264 encoding (macOS) instead of libx264 medium
 #   - Parallel clip encoding workers + clip caching (mtime-based invalidation)
-#   - Concurrent TTS (Edge: 6 workers, ElevenLabs: 2; Kokoro: MPS GPU)
+#   - Parallel legacy clip rendering workers
 #   - Ollama keep_alive so the LLM stays loaded between panels
 # Individual steps read this flag at runtime; the toggle is stored per project
 # in PipelineState.settings['fast_mode'] and propagated here by the orchestrator.
@@ -42,7 +42,6 @@ MANHWA_STITCH_DIR   = os.path.join(BASE_DIR, "manhwa_stitch")    # Stitched full
 MANHWA_DETECT_DIR   = os.path.join(BASE_DIR, "manhwa_detect")    # Detection metadata
 MANHWA_CROP_DIR     = os.path.join(BASE_DIR, "manhwa_crop")      # Cropped panels
 MANHWA_TEXT_DIR     = os.path.join(BASE_DIR, "manhwa_text")      # Extracted text
-MANHWA_AUDIO_DIR    = os.path.join(BASE_DIR, "manhwa_audio")     # Generated audio
 MANHWA_CLIPS_DIR    = os.path.join(BASE_DIR, "manhwa_clips")     # Final video clips
 
 # Legacy folders (kept for backward compatibility)
@@ -51,8 +50,6 @@ MANHWA_PANEL_DIR             = os.path.join(OUTPUT_DIR, "manhwa_panel")
 MANHWA_PANEL_WITH_BUBBLE_DIR = os.path.join(OUTPUT_DIR, "Manhwa_panel_with_bubble")
 PANEL_BUBBLE_DIR             = os.path.join(OUTPUT_DIR, "panel_bubble")
 EXTRACTED_TXT_DIR            = os.path.join(OUTPUT_DIR, "extracted_txt")
-NARRATION_DIR                = os.path.join(OUTPUT_DIR, "narration")
-AUDIO_OUTPUT_DIR             = os.path.join(OUTPUT_DIR, "audio")
 VIDEO_OUTPUT_DIR             = os.path.join(OUTPUT_DIR, "video")
 
 # Ensure directories exist
@@ -60,7 +57,7 @@ for d in [INPUT_DIR, OUTPUT_DIR, MODELS_DIR, TEMP_DIR, ASSETS_DIR, CAST_DIR,
           PROJECTS_DIR,
           # New organized folders
           MANHWA_DOWNLOAD_DIR, MANHWA_STITCH_DIR, MANHWA_DETECT_DIR,
-          MANHWA_CROP_DIR, MANHWA_TEXT_DIR, MANHWA_AUDIO_DIR, MANHWA_CLIPS_DIR,
+          MANHWA_CROP_DIR, MANHWA_TEXT_DIR, MANHWA_CLIPS_DIR,
           # Legacy folders
           RAW_MANHWA_DIR,
           MANHWA_PANEL_DIR, MANHWA_PANEL_WITH_BUBBLE_DIR,
@@ -131,32 +128,6 @@ NARRATION_USER_PROMPT = """Analyze this manhwa panel and write a dramatic narrat
 Focus on: what's happening, character emotions, and any tension or action.
 If there are speech bubbles, incorporate the dialogue naturally into the narration.
 Write ONLY the narration text, nothing else."""
-
-# ─── TTS Settings ────────────────────────────────────────────────
-TTS_ENGINE = "edge"  # "edge", "kokoro", or "elevenlabs"
-TTS_VOICE = "en-US-ChristopherNeural"  # Deep male narrator voice
-TTS_RATE = "-5%"  # Slightly slower for drama
-TTS_PITCH = "-2Hz"
-
-# Kokoro TTS settings
-KOKORO_MODEL_DIR = os.path.join(BASE_DIR, "models", "kokoro")
-KOKORO_VOICE = "af_bella"  # Default Kokoro voice
-KOKORO_SPEED = 1.0
-
-# ElevenLabs TTS settings
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")  # Set via environment or UI
-ELEVENLABS_MODEL = "eleven_monolingual_v1"  # or "eleven_multilingual_v2"
-ELEVENLABS_VOICE_ID = ""  # Will be set by user in UI
-ELEVENLABS_STABILITY = 0.5  # 0.0-1.0, lower = more variable
-ELEVENLABS_SIMILARITY = 0.75  # 0.0-1.0, higher = closer to original voice
-
-# Available narrator voices (good for recaps):
-# en-US-ChristopherNeural - Deep male (recommended)
-# en-US-GuyNeural - Casual male
-# en-US-DavisNeural - Authoritative male
-# en-US-JennyNeural - Clear female
-# en-GB-RyanNeural - British male
-# en-AU-WilliamNeural - Australian male
 
 # ─── Video Composition ────────────────────────────────────────────
 # Resolution presets
@@ -278,7 +249,6 @@ def get_manhwa_paths(manhwa_name: str, chapter_num: int) -> dict:
             'detect': 'manhwa_detect/Sword-Devouring-Swordmaster/Chapter_00001/',
             'crop': 'manhwa_crop/Sword-Devouring-Swordmaster/Chapter_00001/',
             'text': 'manhwa_text/Sword-Devouring-Swordmaster/Chapter_00001/',
-            'audio': 'manhwa_audio/Sword-Devouring-Swordmaster/Chapter_00001/',
             'clips': 'manhwa_clips/Sword-Devouring-Swordmaster/Chapter_00001/',
             'state': 'manhwa_download/Sword-Devouring-Swordmaster/Chapter_00001/state.json'
         }
@@ -291,7 +261,6 @@ def get_manhwa_paths(manhwa_name: str, chapter_num: int) -> dict:
         'detect': os.path.join(MANHWA_DETECT_DIR, manhwa_name, chapter_folder),
         'crop': os.path.join(MANHWA_CROP_DIR, manhwa_name, chapter_folder),
         'text': os.path.join(MANHWA_TEXT_DIR, manhwa_name, chapter_folder),
-        'audio': os.path.join(MANHWA_AUDIO_DIR, manhwa_name, chapter_folder),
         'clips': os.path.join(MANHWA_CLIPS_DIR, manhwa_name, chapter_folder),
     }
     
