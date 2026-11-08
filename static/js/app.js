@@ -568,42 +568,20 @@ socket.on('step_complete', function _handleDownload(data) {
         ` : ''}
       </div>`;
 
-    // Auto-fill project name and folder for the first downloaded chapter
-    const first = downloaded[0];
-    const chNum = String(first.chapter).padStart(3, '0');
-    // Project name is just the manhwa title (clean and simple!)
-    const autoProjectName = mangaName;
-
+    // Load from the manga root so AniFlow discovers every selected Chapter_XXXXX folder.
     const nameInput = document.getElementById('inputProjectName');
     const folderInput = document.getElementById('inputSourceFolder');
+    const mangaRoot = result.download_dir || downloaded[0].path.replace(/[\\/]+Chapter_\\d+$/, '');
 
-    // Always auto-fill when downloading — the whole point is to skip manual entry
-    if (nameInput) nameInput.value = autoProjectName;
-    if (folderInput) folderInput.value = first.path;
-
-    APP.projectName = autoProjectName;
-    APP.sourceFolder = first.path;
-
+    if (nameInput) nameInput.value = mangaName;
+    if (folderInput) folderInput.value = mangaRoot;
+    APP.projectName = mangaName;
+    APP.sourceFolder = mangaRoot;
     SCRAPER.downloadedPaths = downloaded;
 
-    // If multiple chapters were downloaded, show a chapter picker
-    if (downloaded.length > 1) {
-      resultEl.innerHTML += `
-        <div style="margin-top:12px;">
-          <label class="form-label" style="font-weight:700;">🔀 Switch starting chapter</label>
-          <select id="selectDownloadedChapter" class="form-select" onchange="selectDownloadedChapter(this)" style="font-weight:600;">
-            ${downloaded.map((d, i) => `
-              <option value="${i}" ${i === 0 ? 'selected' : ''}>
-                📖 Chapter ${String(d.chapter).padStart(5, '0')} (${d.images} images)
-              </option>
-            `).join('')}
-          </select>
-          <div class="text-xs" style="color:var(--text-dim); margin-top:6px;">
-            Select which chapter to process first. You can switch between chapters later using ← → navigation.
-          </div>
-        </div>`;
-    }
-  }
+    // Downloading the selected range is enough; original AniFlow handles every
+    // chapter in the root folder during its existing load/stitch/Crop 2 pipeline.
+    startSource();
 });
 
 // When user picks a different downloaded chapter from the dropdown
