@@ -1,8 +1,10 @@
 """Generate title ideas and three YouTube thumbnails for a Full Recap project.
 
-Title generation uses AniFlow's configured LLM transport. Thumbnail generation
-uses the OpenAI Images edits endpoint with user-supplied style references and
-selected source panels. API keys are read from environment variables only.
+Title generation uses AniFlow's configured LLM transport and a built-in style
+profile derived from the user's uploaded channel examples. Thumbnail generation
+uses the OpenAI Images edits endpoint with actual source panels and the built-in
+visual profile; per-episode screenshots are optional overrides. API keys are
+read from environment variables only.
 """
 from __future__ import annotations
 
@@ -23,6 +25,27 @@ ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_REFERENCE_BYTES = 20 * 1024 * 1024
 MAX_REFERENCE_COUNT = 16
 THUMBNAIL_SIZE = (1280, 720)
+
+
+DEFAULT_TITLE_STYLE_PROFILE_RU = """Встроенный редакционный профиль названий по предоставленным примерам успешных роликов:
+- Сразу выноси в начало самое понятное и сильное событие: кем герой был, что неожиданно получил/сделал, против кого выступил и к чему это привело.
+- Строй фразу на контрасте или перемене статуса: слабый → опасный, обычный → невероятный, изгнанник → сильнейший, ошибка → неожиданная выгода.
+- Предпочитай конкретные глаголы действия и понятные ставки вместо абстрактного «невероятное приключение».
+- Можно использовать одно акцентное слово ЗАГЛАВНЫМИ буквами или многоточие, но не превращай всё название в крик.
+- Название должно интриговать, но обещать только то, что действительно раскрывается в сценарии.
+- Не копируй готовые названия, синтаксис целиком, характерные словечки или фирменные формулировки из примеров.
+- Делай три разных угла подачи: главный поворот истории; необычная способность/рост героя; конфликт или угроза с высокими ставками.
+- Ориентир по длине — примерно 45–95 символов, если более короткая формулировка яснее и сильнее."""
+
+
+DEFAULT_THUMBNAIL_STYLE_PROFILE_RU = """Встроенный визуальный профиль YouTube-превью по предоставленным примерам:
+- Формат 16:9, очень высокий контраст и насыщенные цвета; композиция читается даже в маленьком размере.
+- Один главный визуальный центр: крупное выразительное лицо героя, необычная способность, противник или драматичный момент.
+- Добавляй короткую надпись на русском из 2–5 слов. Основной вариант оформления — крупный жирный жёлтый текст с толстой чёрной обводкой; для особо драматичной версии допустим белый/красный акцент.
+- При необходимости используй одну заметную стрелку, круг или графический указатель, который помогает понять сюжетный крючок, а не просто украшает кадр.
+- Варианты могут различаться по настроению: яркий/ироничный контраст; красно-чёрная драматичная угроза; эпичный fantasy/action или сравнение «до/после».
+- Сохраняй узнаваемость персонажа по исходным панелям манги; не заменяй его случайным generic-аниме персонажем.
+- Не копируй точную раскладку, текст, логотипы, водяные знаки или композицию чужого превью. Перенимай только общие принципы читаемости и визуальной иерархии."""
 
 
 def _safe_name(filename: str) -> str:
@@ -140,7 +163,7 @@ def generate_title_options(
     """Generate three titles, one video description, and one pinned comment."""
     import llm_transport
 
-    reference_style = title_reference_text.strip()
+    reference_style = (title_reference_text or DEFAULT_TITLE_STYLE_PROFILE_RU).strip()
     if title_reference_paths and vision_model:
         extracted = _read_title_reference_style(
             title_reference_paths, backend, vision_model
@@ -166,8 +189,8 @@ def generate_title_options(
 ВИЗУАЛЬНЫЕ СОБЫТИЯ:
 {chr(10).join(notes[:80])}
 
-РЕФЕРЕНСЫ НАЗВАНИЙ И ИХ СТИЛЬ:
-{reference_style or 'Не указаны. Используй сильные, но конкретные названия.'}
+СТИЛЬ НАЗВАНИЙ (встроенный профиль + необязательные референсы этого выпуска):
+{reference_style}
 
 Сгенерируй ровно 3 РАЗНЫХ названия этого конкретного выпуска.
 Требования:
@@ -175,7 +198,8 @@ def generate_title_options(
 - Каждый вариант должен отражать реальные события из сценария.
 - Не обещай события, которых нет в выпуске.
 - Не используй пустой кликбейт и одинаковые формулировки.
-- Различай варианты по крючку: драматический поворот, сила/способность героя, конфликт/ставки.
+- Различай варианты по крючку: (1) резкий сюжетный поворот/необычная ситуация героя; (2) новая сила, талант или путь от слабости к превосходству; (3) главный конфликт, угроза или цена победы.
+- Используй глаголы действия и ясный контраст статуса; допустимо выделить одно ключевое слово заглавными буквами, но не делай всё название капсом.
 - Длина названия ориентировочно 45–95 символов, если стиль референсов не требует другого.
 - Для каждого названия придумай короткую фразу на обложку (2–5 слов), которая не дублирует название целиком.
 - Дополнительно напиши одно описание ролика на русском: 2–3 предложения с завязкой и главным конфликтом, затем короткий CTA и 5–10 релевантных хештегов. Не придумывай факты.
@@ -255,7 +279,12 @@ def _choose_panel_reference_paths(
     return chosen
 
 
-def _thumbnail_prompt(variant: int, episode_script: str, title: dict[str, str]) -> str:
+def _thumbnail_prompt(
+    variant: int,
+    episode_script: str,
+    title: dict[str, str],
+    style_profile: str = DEFAULT_THUMBNAIL_STYLE_PROFILE_RU,
+) -> str:
     concepts = [
         "A dramatic close-up of the main protagonist, strong readable facial expression, cinematic high contrast, clear separation from background.",
         "A dynamic action moment that captures the central conflict, strong diagonal composition, motion and energy, unmistakable focal point.",
@@ -275,10 +304,13 @@ EPISODE CONTEXT (for factual visual choices):
 THUMBNAIL HOOK TO LEAVE ROOM FOR:
 "{title.get('thumbnail_text', '')}"
 
+VISUAL STYLE PROFILE:
+{style_profile}
+
 Composition requirements:
 - 16:9 YouTube thumbnail, designed for small-screen readability.
 - One dominant subject and one clear story moment; avoid clutter and tiny details.
-- Keep the upper-left or lower-left 35% visually calmer for a large Russian caption to be overlaid afterwards.
+- Keep a calm high-contrast area for a large Russian caption to be overlaid afterwards.
 - High-quality colorful manhwa-inspired illustration, crisp silhouette, dramatic lighting.
 - No text, letters, numbers, captions, logos or watermarks in the generated image. Text will be typeset separately.
 """
@@ -333,12 +365,12 @@ def _overlay_thumbnail_text(image_path: str, text: str, output_path: str) -> Non
         height = bbox[3] - bbox[1]
         y -= height + 12
         draw.text(
-            (x, y), line, font=font, fill=(255, 255, 255, 255),
-            stroke_width=7, stroke_fill=(10, 10, 14, 255),
+            (x, y), line, font=font, fill=(255, 231, 0, 255),
+            stroke_width=9, stroke_fill=(5, 5, 5, 255),
         )
         draw.text(
-            (x, y), line, font=font, fill=(255, 255, 255, 255),
-            stroke_width=1, stroke_fill=(255, 255, 255, 255),
+            (x, y), line, font=font, fill=(255, 231, 0, 255),
+            stroke_width=1, stroke_fill=(255, 231, 0, 255),
         )
 
     combined = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
@@ -374,9 +406,17 @@ def generate_thumbnail_variants(
         if path.is_file() and path.suffix.lower() in ALLOWED_IMAGE_EXTENSIONS
     ] if ref_dir.is_dir() else []
     panel_paths = _choose_panel_reference_paths(visual_context, panels, limit=6)
+    # Global visual style is baked into DEFAULT_THUMBNAIL_STYLE_PROFILE_RU.
+    # Episode-specific screenshots are optional overrides, never a prerequisite.
     image_paths = (reference_paths[:8] + panel_paths)[:MAX_REFERENCE_COUNT]
+    if not panel_paths:
+        panel_paths = [
+            str(panel.get("path")) for panel in panels
+            if panel.get("path") and os.path.isfile(str(panel.get("path")))
+        ][:6]
+        image_paths = (reference_paths[:8] + panel_paths)[:MAX_REFERENCE_COUNT]
     if not image_paths:
-        raise RuntimeError("Сначала загрузите хотя бы один референс обложки для этого выпуска.")
+        raise RuntimeError("Не найдены готовые панели для создания превью. Сначала обработайте главы в AniFlow.")
 
     output_dir = Path(project_dir) / "full_recap" / "thumbnails"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -403,7 +443,10 @@ def generate_thumbnail_variants(
 
             form_data = {
                 "model": model,
-                "prompt": _thumbnail_prompt(index, full_script, titles[index - 1]),
+                "prompt": _thumbnail_prompt(
+                    index, full_script, titles[index - 1],
+                    style_profile=DEFAULT_THUMBNAIL_STYLE_PROFILE_RU,
+                ),
                 "size": "1280x720",
                 "quality": "high",
                 "output_format": "png",
