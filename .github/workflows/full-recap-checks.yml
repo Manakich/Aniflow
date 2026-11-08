@@ -23,6 +23,6 @@ jobs:
       - name: Compile Python modules
         run: python -m compileall -q app.py config.py pipeline
       - name: Run Full Recap unit tests
-        run: python -m pytest tests/test_full_recap.py tests/test_full_recap_media.py tests/test_silent_recap.py tests/test_text_extractor_context.py -q
+        run: python -m pytest tests/test_full_recap.py tests/test_full_recap_media.py tests/test_silent_recap.py tests/test_text_extractor_context.py tests/test_full_recap_prepare.py -q
       - name: Check JavaScript syntax
         run: node --check static/js/app.js
