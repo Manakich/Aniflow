@@ -22,12 +22,9 @@ from flask_socketio import SocketIO, emit
 import config
 from pipeline.orchestrator import Orchestrator, PipelineState
 from pipeline.narrator import Narrator
-from pipeline.tts_engine import get_available_voices, get_tts_status
 from pipeline.cast_system import Cast, list_casts
 from pipeline.script_rewriter import ScriptRewriter
 from pipeline.capcut_director import CapCutDirector
-from pipeline.kokoro_tts import KOKORO_AVAILABLE
-from pipeline.elevenlabs_tts import get_elevenlabs_tts, ELEVENLABS_AVAILABLE
 from pipeline.panel_extractor_yolo import get_global_extractor, get_global_bubble_extractor
 from pipeline.web_scraper import analyze_url, download_chapters, list_downloaded_manga, get_download_root
 from pipeline import character_builder as charbuilder
@@ -60,7 +57,6 @@ def index():
 @app.route('/api/status', methods=['GET'])
 def get_status():
     deps = orchestrator.check_dependencies()
-    deps['tts'] = get_tts_status()
     return jsonify(deps)
 
 @app.route('/api/projects', methods=['GET'])
@@ -1571,12 +1567,6 @@ def rewrite_script(project_name):
 def get_rewrite_styles():
     return jsonify(ScriptRewriter.get_styles())
 
-@app.route('/api/preview-audio/<path:filename>')
-def serve_preview_audio(filename):
-    """Serve preview audio files (supports subdirectories like kokoro/)."""
-    preview_dir = os.path.join(config.PROJECTS_DIR, '_previews')
-    return send_from_directory(preview_dir, filename)
-
 @app.route('/api/preview-detection/<project_name>/<path:page_filename>', methods=['GET'])
 def preview_detection(project_name, page_filename):
     state = PipelineState.load(project_name)
@@ -2052,12 +2042,6 @@ def serve_panel_texts(project_name):
         return send_file(txt_path, mimetype='text/plain')
     return jsonify({'error': 'Panel texts not found'}), 404
 
-@app.route('/api/audio/<project_name>/<filename>')
-def serve_audio(project_name, filename):
-    state = PipelineState.load(project_name)
-    audio_dir = os.path.join(state.project_dir, "audio")
-    return send_from_directory(audio_dir, filename)
-
 @app.route('/api/stitched-image/<project_name>', methods=['GET', 'HEAD'])
 def get_stitched_image(project_name):
     state = PipelineState.load(project_name)
@@ -2325,166 +2309,6 @@ def sort_clips():
         }), 500
 
 
-
-# ─── TTS Voices ──────────────────────────────────────────────────
-@app.route('/api/voices', methods=['GET'])
-def get_voices():
-    try:
-        language = (request.args.get('language') or 'en').strip().lower()
-        # Only allow a short locale prefix; the legacy no-query behavior stays English.
-        if not re.fullmatch(r'[a-z]{2,3}', language):
-            return jsonify({'error': 'Invalid language filter'}), 400
-        return jsonify(get_available_voices(language_filter=language))
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/tts/status', methods=['GET'])
-def get_tts_status_route():
-    """Get status of all TTS engines."""
-    try:
-        return jsonify(get_tts_status())
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/elevenlabs/set-key', methods=['POST'])
-def set_elevenlabs_key():
-    """Set ElevenLabs API key."""
-    try:
-        from pipeline.elevenlabs_tts import get_elevenlabs_tts
-        data = request.json
-        api_key = data.get('api_key', '').strip()
-        
-        if not api_key:
-            return jsonify({'error': 'API key is required'}), 400
-        
-        elevenlabs = get_elevenlabs_tts()
-        elevenlabs.set_api_key(api_key)
-        
-        # Test the API key
-        success, message = elevenlabs.test_api_key()
-        if success:
-            return jsonify({'success': True, 'message': message})
-        else:
-            return jsonify({'success': False, 'error': message}), 400
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/elevenlabs/voices', methods=['GET'])
-def get_elevenlabs_voices():
-    """Get ElevenLabs voices (requires API key to be set first)."""
-    try:
-        from pipeline.elevenlabs_tts import get_elevenlabs_tts
-        elevenlabs = get_elevenlabs_tts()
-        
-        if not elevenlabs.available:
-            return jsonify({'error': 'ElevenLabs API key not configured'}), 400
-        
-        voices = elevenlabs.get_voices(force_refresh=True)
-        return jsonify(voices)
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/elevenlabs/preview/<voice_id>', methods=['GET'])
-def get_elevenlabs_preview(voice_id):
-    """Get preview URL for an ElevenLabs voice."""
-    try:
-        from pipeline.elevenlabs_tts import get_elevenlabs_tts
-        elevenlabs = get_elevenlabs_tts()
-        
-        if not elevenlabs.available:
-            return jsonify({'error': 'ElevenLabs API key not configured'}), 400
-        
-        voices = elevenlabs.get_voices()
-        voice = next((v for v in voices if v['voice_id'] == voice_id), None)
-        
-        if voice and voice.get('preview_url'):
-            return jsonify({'preview_url': voice['preview_url']})
-        else:
-            return jsonify({'error': 'Preview not available for this voice'}), 404
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/tts/preview', methods=['POST'])
-def generate_voice_preview():
-    """Generate a preview audio sample for any TTS voice."""
-    try:
-        data = request.json
-        engine = data.get('engine', 'edge')
-        voice = data.get('voice')
-        text = data.get('text', 'Hello! This is a preview of how I sound.')
-        
-        print(f"[Preview] Request: engine={engine}, voice={voice}")
-        
-        if not voice:
-            return jsonify({'error': 'Voice ID is required'}), 400
-        
-        # For Kokoro, use pre-generated previews to avoid blocking
-        if engine == 'kokoro':
-            print(f"[Preview] Using pre-generated Kokoro preview...")
-            kokoro_preview_dir = os.path.join(config.PROJECTS_DIR, '_previews', 'kokoro')
-            kokoro_preview_path = os.path.join(kokoro_preview_dir, f"{voice}.mp3")
-            
-            if os.path.exists(kokoro_preview_path):
-                # Return pre-generated preview
-                return jsonify({
-                    'success': True,
-                    'preview_url': f'/api/preview-audio/kokoro/{voice}.mp3'
-                })
-            else:
-                print(f"[Preview] Pre-generated preview not found: {kokoro_preview_path}")
-                return jsonify({'error': 'Preview not available for this Kokoro voice. Please regenerate previews.'}), 404
-        
-        # For Edge TTS, generate on-demand (it's async and doesn't block)
-        preview_dir = os.path.join(config.PROJECTS_DIR, '_previews')
-        os.makedirs(preview_dir, exist_ok=True)
-        
-        # Generate preview filename
-        import hashlib
-        voice_hash = hashlib.md5(f"{engine}_{voice}".encode()).hexdigest()[:8]
-        preview_path = os.path.join(preview_dir, f"preview_{voice_hash}.mp3")
-        
-        # Check if preview already exists
-        if os.path.exists(preview_path):
-            print(f"[Preview] Using cached preview: {preview_path}")
-            filename = os.path.basename(preview_path)
-            return jsonify({
-                'success': True,
-                'preview_url': f'/api/preview-audio/{filename}'
-            })
-        
-        # Generate preview audio (Edge TTS only at this point)
-        print(f"[Preview] Generating new Edge TTS preview...")
-        from pipeline.tts_engine import generate_speech
-        
-        try:
-            if engine == 'elevenlabs':
-                from pipeline.elevenlabs_tts import get_elevenlabs_tts
-                elevenlabs = get_elevenlabs_tts()
-                if not elevenlabs.available:
-                    return jsonify({'error': 'ElevenLabs API key not configured'}), 400
-                result = elevenlabs.generate_speech(text, preview_path, voice=voice)
-            else:  # edge
-                result = generate_speech(text, preview_path, voice=voice, engine='edge')
-                print(f"[Preview] Edge generation complete!")
-        except Exception as gen_error:
-            print(f"[Preview] Generation error: {gen_error}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({'error': f'Failed to generate preview: {str(gen_error)}'}), 500
-        
-        print(f"[Preview] Preview generated successfully at {result['audio_path']}")
-        filename = os.path.basename(result['audio_path'])
-        return jsonify({
-            'success': True,
-            'preview_url': f'/api/preview-audio/{filename}',
-            'duration': result.get('duration', 0)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 # ─── Ollama Models ───────────────────────────────────────────────
 @app.route('/api/ollama/models', methods=['GET'])
