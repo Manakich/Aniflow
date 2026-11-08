@@ -209,17 +209,17 @@ def add_youtube_package_to_export(
         json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     (root / "title_options.txt").write_text(
-        "\\n".join(
+        "\n".join(
             f"{index}. {item.get('title', '')}"
             for index, item in enumerate(titles or [], start=1)
-        ) + "\\n",
+        ) + "\n",
         encoding="utf-8",
     )
     (root / "description.txt").write_text(
-        (description or "").rstrip() + "\\n", encoding="utf-8"
+        (description or "").rstrip() + "\n", encoding="utf-8"
     )
     (root / "pinned_comment.txt").write_text(
-        (pinned_comment or "").rstrip() + "\\n", encoding="utf-8"
+        (pinned_comment or "").rstrip() + "\n", encoding="utf-8"
     )
     return {
         "package_json": str(root / "youtube_package.json"),
