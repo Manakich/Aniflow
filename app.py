@@ -654,10 +654,8 @@ def _run_with_settings(step_fn, project_name, data):
         state.settings.update(settings_patch)
         state.save()
     # Also accept top-level convenience keys
-    for key in ('scene_size', 'scene_mode', 'ollama_model', 'tts_voice',
-                'tts_engine', 'tts_speed', 'pipeline_mode', 'full_recap_text_model',
-                'full_recap_scene_size', 'full_recap_style', 'full_recap_story_context',
-                'alignment_model_size', 'alignment_device', 'alignment_compute_type'):
+    for key in ('ollama_model', 'pipeline_mode', 'full_recap_text_model',
+                'full_recap_style', 'full_recap_story_context', 'full_recap_target_words'):
         if key in data:
             state.settings[key] = data[key]
     return step_fn(state)
@@ -767,8 +765,6 @@ def _infer_chapter_stage_light(manhwa_dir, ch_folder):
     img_exts = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.img')
     if count(os.path.join(config.MANHWA_CLIPS_DIR, manhwa_name, ch_folder), lambda f: f.endswith('.mp4')):
         return 'clips_done', saved_error
-    if count(os.path.join(config.MANHWA_AUDIO_DIR, manhwa_name, ch_folder), lambda f: f.endswith('.mp3')):
-        return 'audio_done', saved_error
     if count(os.path.join(config.MANHWA_TEXT_DIR, manhwa_name, ch_folder), lambda f: f.endswith(('.txt', '.json'))):
         return 'text_extracted', saved_error
     if count(os.path.join(config.MANHWA_CROP_DIR, manhwa_name, ch_folder), lambda f: f.startswith('panel_') and f.endswith(('.jpg', '.png'))):
