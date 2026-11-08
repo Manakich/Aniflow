@@ -3327,9 +3327,9 @@ function renderFullRecapPackagePreview() {
   const titleRefs = data.title_references || [];
   el.innerHTML = `
     <div class="settings-panel">
-      <div class="settings-panel-title">📌 Загруженные референсы</div>
-      <div class="text-xs text-dim">Референсы обложек: ${thumbnailRefs.length} · Референсы названий: ${titleRefs.length}</div>
-      <div class="text-xs text-dim mt-1">${thumbnailRefs.map(esc).join(", ") || "Обложки: пока нет"}<br>${titleRefs.map(esc).join(", ") || "Названия: пока нет"}</div>
+      <div class="settings-panel-title">📌 Референсы этого выпуска</div>
+      <div class="text-xs text-dim">Обложки: ${thumbnailRefs.length} · Названия: ${titleRefs.length}</div>
+      <div class="text-xs text-dim mt-1">${thumbnailRefs.map(esc).join(", ") || "Референсы обложек не загружены"}<br>${titleRefs.map(esc).join(", ") || "Референсы названий не загружены"}</div>
     </div>
     ${titles.length ? `
       <div class="settings-panel">
@@ -3339,27 +3339,52 @@ function renderFullRecapPackagePreview() {
             <input type="radio" name="fullRecapSelectedTitle" value="${index}" ${data.selected_title?.title === item.title ? "checked" : ""} onchange="selectFullRecapTitle(${index})" style="margin-top:4px;">
             <span style="flex:1;">
               <strong>${esc(item.title)}</strong>
-              <span class="text-xs text-dim" style="display:block;margin-top:4px;">Текст на обложке: ${esc(item.thumbnail_text || "")} · ${esc(item.angle || "")}</span>
+              <span class="text-xs text-dim" style="display:block;margin-top:4px;">Надпись на обложке: ${esc(item.thumbnail_text || "")} · ${esc(item.angle || "")}</span>
             </span>
           </label>`).join("")}
       </div>` : ""}
     ${thumbs.length ? `
       <div class="settings-panel">
-        <div class="settings-panel-title">🖼️ Варианты обложки</div>
+        <div class="settings-panel-title">🖼️ Три варианта обложки</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;">
           ${thumbs.map((item,index)=>`
             <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
-              <img src="/api/full-recap/${encodeURIComponent(APP.projectName)}/thumbnails/${encodeURIComponent(item.filename)}" alt="Thumbnail ${index+1}" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;">
+              <img src="/api/full-recap/${encodeURIComponent(APP.projectName)}/thumbnails/${encodeURIComponent(item.filename)}" alt="Обложка ${index+1}" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;">
               <div style="padding:10px;">
                 <strong>Обложка ${index+1}</strong>
                 <div class="text-xs text-dim">${esc(item.title || "")}</div>
-                <a href="/api/full-recap/${encodeURIComponent(APP.projectName)}/thumbnails/${encodeURIComponent(item.filename)}" download style="font-size:12px;">Сохранить JPG</a>
+                <a href="/api/full-recap/${encodeURIComponent(APP.projectName)}/thumbnails/${encodeURIComponent(item.filename)}" download style="font-size:12px;">Скачать JPG</a>
               </div>
             </div>`).join("")}
         </div>
       </div>` : ""}
+    ${data.description ? `
+      <div class="settings-panel">
+        <div class="settings-panel-title">📝 Описание видео</div>
+        <textarea id="fullRecapGeneratedDescription" class="form-input" rows="7" readonly>${esc(data.description)}</textarea>
+        <button class="btn btn-secondary mt-2" onclick="copyFullRecapPackageText('description')">Скопировать описание</button>
+      </div>` : ""}
+    ${data.pinned_comment ? `
+      <div class="settings-panel">
+        <div class="settings-panel-title">📌 Закреплённый комментарий</div>
+        <textarea id="fullRecapGeneratedPinnedComment" class="form-input" rows="4" readonly>${esc(data.pinned_comment)}</textarea>
+        <button class="btn btn-secondary mt-2" onclick="copyFullRecapPackageText('pinned_comment')">Скопировать комментарий</button>
+      </div>` : ""}
     ${data.status && data.status !== "ready" ? `<div class="text-xs text-dim mt-2">Статус: ${esc(data.status)}</div>` : ""}
   `;
+}
+
+async function copyFullRecapPackageText(kind) {
+  const value = kind === "description"
+    ? document.getElementById("fullRecapGeneratedDescription")?.value
+    : document.getElementById("fullRecapGeneratedPinnedComment")?.value;
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    toast("Текст скопирован.", "success");
+  } catch (error) {
+    toast("Не удалось скопировать. Выделите текст вручную.", "warning");
+  }
 }
 
 async function selectFullRecapTitle(index) {
