@@ -2,13 +2,11 @@
 Pipeline Orchestrator - Coordinates the full recap generation pipeline.
 Enhanced with multi-resolution, cast system, script rewriting, CapCut export.
 
-Pipeline stages:
-  init → loaded → stitched → detected1 → cropped1 → stitched2 →
-  detected2 → cropped2 → text_extracted → text_removed → narrated →
-  audio_done → video_done
+Pipeline stages for the single-purpose Recap Studio workflow:
+  source download → native Crop 2 panel extraction → OCR/context →
+  one long Russian recap script → numbered panels + silent MP4 → YouTube package.
 
-Smart Resume: every step checks whether its outputs already exist on disk.
-If they do (and boxes haven't changed), the step is skipped instantly.
+Smart Resume: the existing AniFlow download, crop and OCR outputs are reused.
 """
 import hashlib, os, json, time, shutil
 from datetime import datetime
@@ -20,7 +18,6 @@ from pipeline.panel_extractor_yolo import YoloPanelExtractor
 from pipeline.text_extractor import extract_text_all_panels
 from pipeline.text_remover import remove_text_boxes
 from pipeline.narrator import Narrator
-from pipeline.compositor import compose_video, get_video_info
 from pipeline.script_rewriter import ScriptRewriter
 from pipeline.capcut_director import CapCutDirector
 from pipeline.cast_system import Cast, export_project_cast, list_casts
@@ -76,8 +73,7 @@ class PipelineState:
     """
     
     STAGES = ['init', 'loaded', 'stitched', 'detected1', 'cropped1', 'stitched2',
-              'detected2', 'cropped2', 'text_extracted',
-              'text_removed', 'narrated', 'audio_done', 'video_done', 'clips_done']
+              'detected2', 'cropped2', 'text_extracted', 'text_removed']
 
     def __init__(self, project_name):
         # ✅ NAME RESOLUTION: map free-typed names onto the real download
@@ -131,7 +127,6 @@ class PipelineState:
         self.detect_dir = self.paths['detect']
         self.crop_dir = self.paths['crop']
         self.text_dir = self.paths['text']
-        self.audio_dir = self.paths['audio']
         self.clips_dir = self.paths['clips']
         self.state_file = self.paths['state']
         
@@ -185,13 +180,6 @@ class PipelineState:
             'video_resolution': config.VIDEO_RESOLUTION,
             'video_fps': config.VIDEO_FPS,
             'bg_mode': config.BACKGROUND_MODE,
-            'bgm_path': '',
-            'bgm_volume': config.BGM_VOLUME,
-            'watermark_path': '',
-            'custom_bg_path': '',
-            'intro_path': '',
-            'outro_path': '',
-            'export_clips': False,
             'animation_style': 'auto',
             'cast_file': '',
             'panel_method': getattr(config, 'DEFAULT_PANEL_EXTRACTION_METHOD', 'yolo'),
@@ -204,7 +192,6 @@ class PipelineState:
         os.makedirs(self.detect_dir, exist_ok=True)
         os.makedirs(self.crop_dir, exist_ok=True)
         os.makedirs(self.text_dir, exist_ok=True)
-        os.makedirs(self.audio_dir, exist_ok=True)
         os.makedirs(self.clips_dir, exist_ok=True)
     
     def set_source(self, source_folder: str):
@@ -2664,210 +2651,6 @@ class Orchestrator:
         return out
 
     # ─── Simplified Auto Pipeline (No Narration) ────────────────────
-    def step_auto_pipeline(self, project_name, source_folder=None, settings=None):
-        """
-        Fully automatic pipeline: Load → Stitch → Detect 1 → Crop 1 →
-        Extract Text → Audio (from text) → Video.
-
-        No narration step. Extracted dialogue text goes directly to TTS.
-        Output structure per chapter:
-          texts/p{N}.txt    — extracted dialogue
-          audio/p{N}.mp3    — TTS audio
-          clips/clip_{N}.mp4 — per-panel video clip
-          <Chapter>_recap.mp4 — final combined video
-        """
-        self._running = True
-        self._should_cancel = False
-
-        # Step 1: Load
-        self._emit_progress('auto_pipeline', 0, 7, "Step 1/7: Loading images...")
-        state = self.step_load_images(project_name, source_folder or '')
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        if settings:
-            state.settings.update(settings)
-            state.save()
-
-        # Step 2: Stitch
-        self._emit_progress('auto_pipeline', 1, 7, "Step 2/7: Stitching images...")
-        state = self.step_stitch(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-
-        # Step 3: Detect 1 (bubble text model)
-        self._emit_progress('auto_pipeline', 2, 7, "Step 3/7: Detecting panels (bubble text model)...")
-        state = self.step_detect_bubble_text(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-
-        # Step 4: Crop 1
-        self._emit_progress('auto_pipeline', 3, 7, "Step 4/7: Cropping detected panels...")
-        state = self.step_crop_bubble_text_panels(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-
-        # Step 5: Extract dialogue text from panels using qwen2.5vl:3b
-        self._emit_progress('auto_pipeline', 4, 7, "Step 5/7: Extracting text from panels (qwen2.5vl:3b)...")
-        state = self.step_extract_dialogue_text(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-
-        # Save per-panel text files
-        texts_dir = os.path.join(state.project_dir, "texts")
-        os.makedirs(texts_dir, exist_ok=True)
-        for pwt in state.panels_with_text:
-            pid = pwt['panel_id']
-            txt_content = pwt.get('text', '(no dialogue)')
-            txt_path = os.path.join(texts_dir, f"p{pid}.txt")
-            with open(txt_path, 'w', encoding='utf-8') as f:
-                f.write(txt_content)
-        print(f"[AutoPipeline] Saved {len(state.panels_with_text)} text files to {texts_dir}")
-
-        # Step 6: Generate audio from extracted text (not narration)
-        self._emit_progress('auto_pipeline', 5, 7, "Step 6/7: Generating audio from extracted text...")
-        try:
-            from pipeline.tts_engine import generate_all_audio
-            s = state.settings
-            state.panels_with_text = generate_all_audio(
-                state.panels_with_text, state.project_dir,
-                voice=s.get('tts_voice'),
-                rate=s.get('tts_rate'),
-                engine=s.get('tts_engine', 'edge'),
-                speed=s.get('tts_speed', 1.0),
-                progress_callback=lambda c, t, m: self._emit_progress('tts', c, t, m),
-                text_field='text',
-            )
-            state.stage = 'audio_done'
-            state.error = None
-            state.save()
-        except Exception as e:
-            state.error = f"Audio generation failed: {e}"
-            state.save()
-            self._running = False
-            return state
-
-        if self._should_cancel:
-            self._running = False
-            return state
-
-        # Step 7: Compose video — per-panel clips + final combined video
-        self._emit_progress('auto_pipeline', 6, 7, "Step 7/7: Composing video...")
-        try:
-            from pipeline.compositor import compose_video
-            s = state.settings
-
-            # Use panels_with_text as the visual/audio source
-            video_panels = state.panels_with_text
-
-            output_path = compose_video(
-                video_panels, state.project_dir,
-                resolution=s.get('video_resolution', '1080p'),
-                fps=s.get('video_fps', 30),
-                quality=s.get('video_quality', 'medium'),
-                bgm_path=s.get('bgm_path', ''),
-                watermark_path=s.get('watermark_path', ''),
-                bg_mode=s.get('bg_mode', 'blur'),
-                custom_bg_path=s.get('custom_bg_path', ''),
-                intro_path=s.get('intro_path', ''),
-                outro_path=s.get('outro_path', ''),
-                export_clips=config.AUTO_PIPELINE_EXPORT_CLIPS,
-                animation_style=s.get('animation_style', 'auto'),
-                scene_mode=False,
-                progress_callback=lambda c, t, m: self._emit_progress('video', c, t, m),
-            )
-            state.video_path = output_path
-            state.stage = 'video_done'
-            state.error = None
-            state.save()
-
-            from pipeline.compositor import get_video_info
-            info = get_video_info(output_path)
-            print(f"[AutoPipeline] Video complete: {output_path}")
-            print(f"[AutoPipeline] Duration: {info.get('duration', 0):.1f}s, Size: {info.get('size_mb', 0):.1f}MB")
-        except Exception as e:
-            state.error = f"Video composition failed: {e}"
-            state.save()
-
-        self._running = False
-        self._emit_progress('auto_pipeline', 7, 7, "✅ Auto pipeline complete!")
-        return state
-
-    # ─── Full Auto Pipeline (Legacy with Narration) ───────────────
-    def run_full_pipeline(self, project_name, source_folder, settings=None):
-        self._running = True
-        self._should_cancel = False
-        state = self.step_load_images(project_name, source_folder)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        if settings:
-            state.settings.update(settings)
-            state.save()
-        state = self.step_stitch(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        panel_method = state.settings.get('panel_method', 'geometric')
-        if panel_method == 'yolo':
-            state = self.step_crop_panels_yolo(state)
-        else:
-            state = self.step_crop_panels(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_extract_text(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_remove_text_boxes(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_narrate(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_generate_audio(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_compose_video(state)
-        self._running = False
-        return state
-
-    def resume_pipeline(self, project_name):
-        state = PipelineState.load(project_name)
-        self._running = True
-        self._should_cancel = False
-        stage_steps = {
-            'loaded': [self.step_stitch, self._route_crop_panels, self.step_extract_text,
-                       self.step_remove_text_boxes, self.step_narrate,
-                       self.step_generate_audio, self.step_compose_video],
-            'stitched': [self._route_crop_panels, self.step_extract_text,
-                         self.step_remove_text_boxes, self.step_narrate,
-                         self.step_generate_audio, self.step_compose_video],
-            'cropped': [self.step_extract_text, self.step_remove_text_boxes,
-                        self.step_narrate, self.step_generate_audio,
-                        self.step_compose_video],
-            'text_extracted': [self.step_remove_text_boxes, self.step_narrate,
-                               self.step_generate_audio, self.step_compose_video],
-            'text_removed': [self.step_narrate, self.step_generate_audio,
-                             self.step_compose_video],
-            'narrated': [self.step_generate_audio, self.step_compose_video],
-            'audio_done': [self.step_compose_video],
-        }
-        for step_fn in stage_steps.get(state.stage, []):
-            if self._should_cancel: break
-            state = step_fn(state)
-            if state.error: break
-        self._running = False
-        return state
-
     def _route_crop_panels(self, state):
         panel_method = state.settings.get('panel_method', 'geometric')
         if panel_method == 'yolo':
