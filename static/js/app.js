@@ -3064,11 +3064,10 @@ function renderFullRecapScriptPreview() {
   el.value = text;
   const meta = document.getElementById("fullRecapScriptMeta");
   if (meta) {
-    const kept = FULL_RECAP_DATA?.kept_panel_count || 0;
-    const skipped = FULL_RECAP_DATA?.skipped_panel_count || 0;
-    const filterInfo = kept || skipped ? ` · кадров: ${kept} оставлено / ${skipped} пропущено` : "";
+    const words = Number(FULL_RECAP_DATA?.word_count || (text.match(/[A-Za-zА-Яа-яЁё0-9]+(?:[’'-][A-Za-zА-Яа-яЁё0-9]+)*/gu) || []).length);
+    const duration = Number(FULL_RECAP_DATA?.duration_seconds || words * 0.72);
     meta.textContent = text
-      ? `${text.length.toLocaleString("ru-RU")} символов · ${FULL_RECAP_DATA?.visual_cues?.length || 0} смысловых визуальных отрезков${filterInfo}`
+      ? `${words.toLocaleString("ru-RU")} слов · расчётная длительность немого видео: ${formatRecapDuration(duration)}`
       : "Сценарий ещё не создан.";
   }
 }
