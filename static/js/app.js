@@ -18,7 +18,6 @@ const APP = {
   steps: [],            // step definitions for current mode
   
   // User-selected batch mode (explicit toggle)
-  userBatchMode: false, // User's explicit choice: false = single, true = batch
   
   // Chapter navigation for batch processing
   manhwaName: '',       // e.g., "Sword-Devouring-Swordmaster"
@@ -64,118 +63,11 @@ function setDot(id, ok) {
 // ─── Projects ────────────────────────────────────────────
 async function loadProjects() {
   try {
-    const r = await fetch('/api/projects');
-    const projects = await r.json();
+    const response = await fetch('/api/projects');
+    const projects = await response.json();
     renderProjects(projects);
-  } catch (e) { /* ignore */ }
-  // 🚀 Batch dashboard: manhwa folders with per-chapter progress
-  try {
-    const r = await fetch('/api/batch-projects');
-    const batchProjects = await r.json();
-    renderBatchDashboard(batchProjects);
-  } catch (e) { /* ignore */ }
-}
-
-const BATCH_STAGE_META = {
-  init:           { label: '—',        color: 'rgba(255,255,255,0.25)' },
-  loaded:         { label: 'DL',       color: '#60a5fa' },
-  stitched:       { label: 'ST',       color: '#818cf8' },
-  detected1:      { label: 'DET',      color: '#a78bfa' },
-  cropped1:       { label: 'CRP',      color: '#c084fc' },
-  stitched2:      { label: 'ST2',      color: '#d8b4fe' },
-  detected2:      { label: 'DET2',     color: '#e879f9' },
-  cropped2:       { label: 'CRP2',     color: '#f0abfc' },
-  text_extracted: { label: 'TXT',      color: '#f472b6' },
-  text_removed:   { label: 'CLN',      color: '#fb7185' },
-  clips_done:     { label: 'DONE',     color: '#34d399' },
-  video_done:     { label: 'DONE',     color: '#34d399' },
-};
-
-function renderBatchDashboard(projects) {
-  const grid = document.getElementById('projectsGrid');
-  APP._batchProjects = projects || [];
-  if (!grid || !projects || projects.length === 0) return;
-
-  const cards = projects.map(p => {
-    const chips = p.chapters.map(c => {
-      const meta = BATCH_STAGE_META[c.stage] || BATCH_STAGE_META.init;
-      return `<span title="Chapter ${String(c.chapter).padStart(5, '0')} — ${c.stage} (${c.images} images)"
-                    style="display:inline-block; padding:2px 7px; margin:2px; border-radius:6px; font-size:10px; font-weight:700; color:#0b0d12; background:${meta.color}; opacity:${c.stage === 'init' ? 0.35 : 0.95};">${c.chapter}:${meta.label}</span>`;
-    }).join('');
-    const ready = p.chapters.filter(c => c.stage === 'clips_done' || c.stage === 'video_done').length;
-    const failed = p.chapters.filter(c => c.error);
-    return `
-    <div class="project-card" style="grid-column:1/-1; cursor:default;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
-        <div style="flex:1; min-width:260px;">
-          <div class="project-card-name" style="margin-bottom:4px;">📘 ${esc(p.display_name)}</div>
-          <div class="project-card-meta" style="margin-bottom:8px;">
-            ${p.total} chapter${p.total > 1 ? 's' : ''} · ${p.with_images} downloaded · ${ready} fully rendered
-            ${failed.length ? ` · <span style="color:var(--color-error); font-weight:600;">${failed.length} with errors</span>` : ''}
-          </div>
-          <div style="margin-bottom:10px;">${chips}</div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px;" onclick="openBatchProject('${esc(p.name)}')">📂 Open</button>
-            <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px; color:var(--color-error); border-color:var(--color-error);" onclick="confirmDeleteProject('${esc(p.name)}')" title="Delete this project and all its files">🗑️ Delete</button>
-          </div>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-  grid.innerHTML = cards + (grid.querySelector('.empty-state') ? '' : grid.innerHTML);
-}
-
-async function openBatchProject(name) {
-  APP.mode = 'full_recap';
-  APP.steps = FULL_RECAP_STEPS;
-  APP.projectName = name;
-  APP.projectData = null;
-  document.getElementById('viewHome').classList.add('hidden');
-  document.getElementById('viewWizard').classList.remove('hidden');
-  APP.currentStep = 1; // Stitch step — the pipeline hub
-  renderWizard();
-  await loadProjectData(name);
-}
-
-// ─── 🗑️ Project deletion (two-step confirm) ──────────────
-function confirmDeleteProject(name) {
-  if (APP.batchRunning) {
-    toast('Wait for the running batch to finish first', 'warning');
-    return;
-  }
-  const p = (APP._batchProjects || []).find(x => x.name === name);
-  const displayName = p ? p.display_name : name;
-  const total = p ? p.total : 0;
-  openModal('⚠️ Delete this project?', `
-    <p style="font-size:14px; margin-bottom:10px;">
-      Are you sure you want to permanently delete <strong>${esc(displayName)}</strong>?
-    </p>
-    <p style="font-size:13px; color:var(--text-secondary); line-height:1.6;">
-      This wipes <strong>everything</strong> related to it:
-      all ${total} chapter folder(s) of downloaded images, stitched strips,
-      existing cropped panels, a Russian recap script, numbered images and a silent video.
-      <strong style="color:var(--color-error);">This cannot be undone.</strong>
-    </p>
-  `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-    <button class="btn btn-danger" style="font-weight:700;" onclick="deleteProjectConfirmed('${esc(name)}')">🗑️ Yes, delete everything</button>
-  `);
-}
-
-async function deleteProjectConfirmed(name) {
-  try {
-    const r = await fetch(`/api/batch-projects/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    const data = await r.json();
-    if (!r.ok) {
-      toast(`Delete failed: ${data.error}`, 'error');
-      return;
-    }
-    closeModal();
-    toast(`🗑️ "${name}" wiped from disk`, 'success');
-    if (APP.projectName === name) { APP.projectName = ''; APP.projectData = null; }
-    loadProjects(); // refresh the dashboard without the deleted card
-  } catch (e) {
-    toast('Delete failed: ' + e.message, 'error');
+  } catch (error) {
+    console.warn('Could not load recent projects:', error);
   }
 }
 
@@ -3117,34 +3009,6 @@ async function runFullRecapPackage() {
 }
 
 // ─── Step: Video ────────────────────────────────────────
-function setBatchMode(isBatch) {
-  APP.userBatchMode = isBatch;
-  
-  // Show/hide batch mode hint
-  const hint = document.getElementById('batchModeHint');
-  if (hint) {
-    hint.style.display = isBatch ? 'block' : 'none';
-  }
-  
-  // Update radio button styling
-  const labels = document.querySelectorAll('.radio-option');
-  labels.forEach(label => {
-    const radio = label.querySelector('input[type="radio"]');
-    if (radio) {
-      if (radio.checked) {
-        label.style.borderColor = 'var(--blue)';
-        label.style.background = 'var(--blue-tint)';
-      } else {
-        label.style.borderColor = '#9BA0A8';
-        label.style.background = 'var(--paper)';
-      }
-    }
-  });
-  
-  console.log('[Batch Mode] User selected:', isBatch ? 'BATCH' : 'SINGLE');
-}
-
-// ─── Navigation ─────────────────────────────────────────
 function nextStep() {
   if (APP.currentStep < APP.steps.length - 1) {
     APP.currentStep++;
