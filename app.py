@@ -569,7 +569,8 @@ def run_step(step_name):
         'crop2': lambda: orchestrator.step_crop_art_panels(PipelineState.load(project_name)),
         'extract_text': lambda: orchestrator.step_extract_dialogue_text(PipelineState.load(project_name)),
         'extract_dialogue': lambda: orchestrator.step_extract_dialogue_text(PipelineState.load(project_name)),
-        # Product-specific steps: Russian recap, silent MP4 and YouTube package.
+        # Full Recap Studio: prepare existing panels once, then script, silent video and YouTube package.
+        'full_recap_prepare': lambda: orchestrator.step_full_recap_prepare(PipelineState.load(project_name)),
         'full_recap_script': lambda: _run_with_settings(orchestrator.step_full_recap_script, project_name, data),
         'full_recap_video': lambda: _run_with_settings(orchestrator.step_full_recap_video, project_name, data),
         'full_recap_package': lambda: _run_with_settings(orchestrator.step_full_recap_package, project_name, data),
