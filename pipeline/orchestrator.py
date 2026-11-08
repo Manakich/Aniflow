@@ -1165,20 +1165,6 @@ class Orchestrator:
                 state.save()
                 return state
 
-            # Single-file source: image, ZIP/CBZ archive or PDF comic.
-            if os.path.isfile(load_dir):
-                from pipeline.downloader import load_from_archive_file
-                images = load_from_archive_file(load_dir, state.download_dir)
-                if not images:
-                    raise ValueError("В выбранном файле не найдено ни одной читаемой страницы.")
-                state.raw_pages = images
-                state.source_folder = load_dir
-                state.stage = 'loaded'
-                state.error = None
-                state.save()
-                self._emit_progress('load', 1, 1, f"Загружено страниц из файла: {len(images)}")
-                return state
-            
             # Check for batch mode: multiple Chapter_XXXXX folders?
             # ✅ BATCH FIX: only count folders that actually contain images —
             # empty folders (e.g. a stray Chapter_00000) must not become chapters.
