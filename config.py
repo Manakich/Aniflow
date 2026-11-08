@@ -18,12 +18,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SPEED_MODE = False
 
 # ⚡ Speed Mode tunables (resolved from state.settings by the orchestrator).
-# Keys: clip_workers, encoder, edge_workers, elevenlabs_workers, kokoro_gpu
+# Keys: clip_workers, encoder
 SPEED_SETTINGS = {}
 
-# ⚡ Concurrency for the AI steps (extraction + narration Phase 1) when Speed
-# Mode is ON. 2 is the sweet spot for Ollama on Apple Silicon — the runner
-# batches requests without thrashing the KV cache. Override via env var.
+# ⚡ Concurrency for image/text extraction when Speed Mode is ON.
 AI_SPEED_WORKERS = int(os.getenv("AI_SPEED_WORKERS", "2"))
 
 # ─── Top-level organisation ──────────────────────────────────────
@@ -61,18 +59,16 @@ for d in [INPUT_DIR, OUTPUT_DIR, MODELS_DIR, TEMP_DIR, ASSETS_DIR, CAST_DIR,
           # Legacy folders
           RAW_MANHWA_DIR,
           MANHWA_PANEL_DIR, MANHWA_PANEL_WITH_BUBBLE_DIR,
-          PANEL_BUBBLE_DIR, EXTRACTED_TXT_DIR, NARRATION_DIR,
-          AUDIO_OUTPUT_DIR, VIDEO_OUTPUT_DIR]:
+          PANEL_BUBBLE_DIR, EXTRACTED_TXT_DIR, VIDEO_OUTPUT_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Sub-asset directories
-BGM_DIR = os.path.join(ASSETS_DIR, "bgm")
 WATERMARK_DIR = os.path.join(ASSETS_DIR, "watermarks")
 BACKGROUNDS_DIR = os.path.join(ASSETS_DIR, "backgrounds")
 INTROS_DIR = os.path.join(ASSETS_DIR, "intros")
 OUTROS_DIR = os.path.join(ASSETS_DIR, "outros")
 
-for d in [BGM_DIR, WATERMARK_DIR, BACKGROUNDS_DIR, INTROS_DIR, OUTROS_DIR]:
+for d in [WATERMARK_DIR, BACKGROUNDS_DIR, INTROS_DIR, OUTROS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # ─── YOLO Panel Detection ─────────────────────────────────────────
@@ -171,11 +167,6 @@ BACKGROUND_COLOR = (10, 10, 15)
 BACKGROUND_COLOR_HEX = "#000000"  # For color and blur_color modes
 COLOR_OVERLAY_OPACITY = 0.5  # For blur_color mode (0.0-1.0)
 
-# BGM settings
-BGM_VOLUME = 0.15  # Background music volume (0-1)
-BGM_FADE_IN = 2.0  # seconds
-BGM_FADE_OUT = 3.0
-
 # Watermark
 WATERMARK_OPACITY = 0.3
 WATERMARK_POSITION = "bottom_right"  # top_left, top_right, bottom_left, bottom_right, center
@@ -187,49 +178,6 @@ MAX_PANEL_HEIGHT = 3000  # Maximum panel height
 GAP_THRESHOLD = 15  # Min white gap between panels (pixels)
 BORDER_COLOR_THRESHOLD = 240  # Consider pixels above this as "white/gap"
 MIN_PANEL_ASPECT_RATIO = 0.2  # width/height minimum
-
-# ─── Auto Pipeline Settings ──────────────────────────────────────
-AUTO_PIPELINE_EXPORT_CLIPS = True   # Export per-panel clips in auto mode
-AUTO_PIPELINE_SILENT_DURATION = 2.0 # Duration (seconds) for panels with no dialogue
-
-# ─── CapCut Export Settings ──────────────────────────────────────
-CAPCUT_SUBTITLE_FONT = "Inter"
-CAPCUT_SUBTITLE_SIZE = 40
-CAPCUT_SUBTITLE_COLOR = "#FFFFFF"
-CAPCUT_SUBTITLE_BG = "rgba(0,0,0,0.6)"
-CAPCUT_IN_ANIMATION = "fade"  # fade, slide_up, zoom, bounce
-CAPCUT_OUT_ANIMATION = "fade"
-
-# ─── Script Rewriter ─────────────────────────────────────────────
-REWRITER_STYLES = {
-    "casual": (
-        "Rewrite like a friend casually explaining the chapter to another friend. "
-        "Natural spoken language, contractions, no theatrics. Connect the events into "
-        "one continuous flow instead of listing them."
-    ),
-    "dramatic": (
-        "Rewrite with more tension and urgency, but still sound like a person talking, "
-        "not a movie trailer. Short punchy sentences, one flowing sequence."
-    ),
-    "epic": (
-        "Rewrite with a grander, more cinematic tone — bigger stakes, weightier words — "
-        "while keeping it spoken and continuous, never purple prose."
-    ),
-    "horror": (
-        "Rewrite with a dark, ominous tone. Build dread through understatement and pacing, "
-        "not exclamation marks. Keep it flowing like a story being told in a quiet room."
-    ),
-    "comedy": (
-        "Rewrite with dry wit. Let the narrator react to absurd or ridiculous moments "
-        "like a friend would ('bro really thought that would work'). Never force a joke "
-        "over actual story information."
-    ),
-    "hype": (
-        "Rewrite like an excited friend who just read the chapter and can't wait to tell "
-        "you about it. High energy, but keep the story clear and continuous."
-    ),
-}
-
 
 # ─── Path Helper Functions ───────────────────────────────────────
 
@@ -320,7 +268,6 @@ def chapter_paths(series: str, chapter: str) -> dict:
       manhwa_download/<series>/<chapter>/001.img, 002.img ...
       manhwa_crop/<series>/<chapter>/panel_001.png ...
       manhwa_text/<series>/<chapter>/extracted_text.json
-      manhwa_audio/<series>/<chapter>/panel_001.mp3 ...
       manhwa_clips/<series>/<chapter>/scene_001.mp4 ...
     """
     # Parse chapter number from string (e.g., "Chapter_001" -> 1)
