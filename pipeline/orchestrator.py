@@ -2543,12 +2543,27 @@ class Orchestrator:
             state.error = None
             package_dir = os.path.join(workspace, "full_recap")
             os.makedirs(package_dir, exist_ok=True)
+            youtube_package = {
+                "titles": state.full_recap_titles,
+                "selected_title": state.full_recap_selected_title,
+                "description": state.full_recap_description,
+                "pinned_comment": state.full_recap_pinned_comment,
+            }
             with open(os.path.join(package_dir, "youtube_package.json"), "w", encoding="utf-8") as f:
-                json.dump({
-                    "titles": state.full_recap_titles,
-                    "description": state.full_recap_description,
-                    "pinned_comment": state.full_recap_pinned_comment,
-                }, f, ensure_ascii=False, indent=2)
+                json.dump(youtube_package, f, ensure_ascii=False, indent=2)
+
+            # The downloadable export ZIP should contain the entire finished
+            # video package, not only the MP4 and numbered source panels.
+            if state.full_recap_export_dir and os.path.isdir(state.full_recap_export_dir):
+                from pipeline.full_recap_renderer import add_youtube_package_to_export
+                add_youtube_package_to_export(
+                    state.full_recap_export_dir,
+                    titles=state.full_recap_titles,
+                    description=state.full_recap_description,
+                    pinned_comment=state.full_recap_pinned_comment,
+                    selected_title=state.full_recap_selected_title,
+                    thumbnails=thumbnails,
+                )
             state.save()
             self._emit_progress('full_recap_package', 6, 6, "Готовы 3 названия, 3 обложки, описание и закреплённый комментарий.")
         except Exception as e:
