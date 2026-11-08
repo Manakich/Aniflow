@@ -493,7 +493,7 @@ def update_full_recap_script(project_name):
     script_dir = os.path.join(workspace, 'full_recap')
     os.makedirs(script_dir, exist_ok=True)
     with open(os.path.join(script_dir, 'script.txt'), 'w', encoding='utf-8') as file:
-        file.write(full_text + '\\n')
+        file.write(full_text + '\n')
     state.save()
     return jsonify({
         'status': 'saved',
