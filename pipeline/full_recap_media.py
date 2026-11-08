@@ -137,7 +137,7 @@ def generate_title_options(
     title_reference_paths: list[str] | None = None,
     vision_model: str | None = None,
 ) -> dict[str, Any]:
-    """Generate three factual Russian video titles and short thumbnail hooks."""
+    """Generate three titles, one video description, and one pinned comment."""
     import llm_transport
 
     reference_style = title_reference_text.strip()
@@ -178,12 +178,16 @@ def generate_title_options(
 - Различай варианты по крючку: драматический поворот, сила/способность героя, конфликт/ставки.
 - Длина названия ориентировочно 45–95 символов, если стиль референсов не требует другого.
 - Для каждого названия придумай короткую фразу на обложку (2–5 слов), которая не дублирует название целиком.
+- Дополнительно напиши одно описание ролика на русском: 2–3 предложения с завязкой и главным конфликтом, затем короткий CTA и 5–10 релевантных хештегов. Не придумывай факты.
+- Напиши один закреплённый комментарий: конкретный вопрос о поступке, выборе или повороте этой истории и короткое приглашение поделиться мнением.
 
 Верни только JSON:
 {{
   "titles": [
     {{"title": "...", "thumbnail_text": "...", "angle": "..."}}
-  ]
+  ],
+  "description": "...",
+  "pinned_comment": "..."
 }}"""
     raw = llm_transport.as_transport(backend).chat(
         text_model, prompt,
@@ -204,7 +208,17 @@ def generate_title_options(
             cleaned.append({"title": title, "thumbnail_text": hook, "angle": angle})
     if len(cleaned) < 3:
         raise RuntimeError("Модель не вернула три корректных названия. Повторите генерацию.")
-    return {"titles": cleaned[:3], "reference_style": reference_style}
+
+    description = re.sub(r"\n{3,}", "\n\n", str(parsed.get("description") or "")).strip()
+    pinned_comment = re.sub(r"\s+", " ", str(parsed.get("pinned_comment") or "")).strip()
+    if not description or not pinned_comment:
+        raise RuntimeError("Модель не вернула описание или закреплённый комментарий.")
+    return {
+        "titles": cleaned[:3],
+        "description": description,
+        "pinned_comment": pinned_comment,
+        "reference_style": reference_style,
+    }
 
 
 def _choose_panel_reference_paths(
