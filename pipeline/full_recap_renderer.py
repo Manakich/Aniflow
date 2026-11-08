@@ -1,189 +1,155 @@
-"""Render one continuous video timeline under one complete narration track."""
+"""Render the numbered AniFlow art panels as one silent, sequential MP4."""
 from __future__ import annotations
 
+import json
 import os
+import shutil
+from pathlib import Path
 from typing import Any
 
+from pipeline.recap_script_writer import count_words, target_video_duration_seconds
 
-def render_full_recap_video(
+
+def _format_duration(seconds: float) -> str:
+    total = max(0, int(round(seconds)))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def export_numbered_panels(
     panels: list[dict[str, Any]],
-    visual_timeline: dict[str, Any],
-    audio_path: str,
+    export_dir: str,
+    script_text: str,
+) -> dict[str, Any]:
+    """Copy already-cropped panel images in reading order and write a manifest.
+
+    This is an export/numbering step only. It does not detect, crop, filter,
+    transform, or regenerate images.
+    """
+    if not panels:
+        raise ValueError("Нет готовых изображений для экспорта")
+
+    root = Path(export_dir)
+    numbered_dir = root / "numbered_panels"
+    numbered_dir.mkdir(parents=True, exist_ok=True)
+    for item in numbered_dir.iterdir():
+        if item.is_file():
+            item.unlink()
+
+    entries = []
+    for number, panel in enumerate(panels, start=1):
+        source = Path(str(panel.get("path") or ""))
+        if not source.is_file():
+            raise FileNotFoundError(f"Подготовленный кадр не найден: {source}")
+        suffix = source.suffix.lower() or ".jpg"
+        filename = f"{number:06d}{suffix}"
+        destination = numbered_dir / filename
+        shutil.copy2(source, destination)
+        entries.append({
+            "number": number,
+            "filename": filename,
+            "panel_id": panel.get("panel_id"),
+            "source_panel_id": panel.get("source_panel_id", panel.get("panel_id")),
+            "chapter": panel.get("source_chapter"),
+            "original_path": str(source),
+            "export_path": str(destination),
+        })
+
+    word_count = count_words(script_text)
+    duration = target_video_duration_seconds(word_count)
+    script_path = root / "script.txt"
+    script_path.write_text((script_text or "").strip() + "\n", encoding="utf-8")
+
+    manifest = {
+        "panel_count": len(entries),
+        "word_count": word_count,
+        "target_duration_seconds": duration,
+        "target_duration_hms": _format_duration(duration),
+        "seconds_per_word": 0.72,
+        "panels": entries,
+    }
+    manifest_path = root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "numbered_dir": str(numbered_dir),
+        "script_path": str(script_path),
+        "manifest_path": str(manifest_path),
+        "panel_count": len(entries),
+        "word_count": word_count,
+        "duration_seconds": duration,
+        "duration_hms": _format_duration(duration),
+        "panels": entries,
+    }
+
+
+def render_silent_recap_video(
+    panels: list[dict[str, Any]],
+    script_text: str,
     output_path: str,
     *,
-    resolution: str = "1080p",
+    resolution: str = "1080p_landscape",
     fps: int = 30,
     quality: str = "medium",
-    bg_mode: str = "blur",
-    custom_bg_path: str | None = None,
     animation_style: str = "auto",
-    watermark_path: str | None = None,
-    bgm_path: str | None = None,
-    bgm_volume: float = 0.12,
     progress_callback=None,
-) -> str:
-    """Use the narration file as the master clock; never trim or time-stretch it."""
-    from moviepy import AudioFileClip, CompositeAudioClip, concatenate_audioclips, concatenate_videoclips
+) -> dict[str, Any]:
+    """Render every existing panel sequentially at 0.72 sec per script word.
+
+    There is intentionally no audio input, TTS, audio stream, music, or timeline
+    alignment. Each panel receives an equal share of the target video duration.
+    """
+    from moviepy import concatenate_videoclips
     from pipeline import compositor
 
-    if not os.path.isfile(audio_path):
-        raise FileNotFoundError(f"Файл озвучки не найден: {audio_path}")
     if not panels:
-        raise ValueError("Нет изображений для монтажа")
+        raise ValueError("Нет готовых изображений для видео")
+    word_count = count_words(script_text)
+    duration = target_video_duration_seconds(word_count)
+    if duration <= 0:
+        raise ValueError("Сценарий пустой: невозможно рассчитать длительность видео")
 
     width, height = compositor.RESOLUTION_MAP.get(resolution, (1920, 1080))
-    fps = fps if fps in compositor.FPS_OPTIONS else 30
-    panel_lookup = {str(panel.get("panel_id")): panel for panel in panels}
-
-    narration = AudioFileClip(audio_path)
-    audio_duration = float(narration.duration)
-    if audio_duration <= 0:
-        narration.close()
-        raise ValueError("Длительность озвучки равна нулю")
-
-    entries = sorted(
-        visual_timeline.get("entries", []),
-        key=lambda entry: float(entry.get("start", 0.0)),
-    )
-    if not entries:
-        narration.close()
-        raise ValueError("Визуальный таймлайн пуст")
-
-    # Normalize visual intervals to the audio clock. Gaps hold the preceding
-    # image; if the last shot ends early, it remains until the audio ends.
-    normalized = []
-    cursor = 0.0
-    for item in entries:
-        panel = panel_lookup.get(str(item.get("panel_id")))
-        if panel is None:
-            continue
-        start = max(0.0, min(audio_duration, float(item.get("start", cursor))))
-        end = max(0.0, min(audio_duration, float(item.get("end", cursor))))
-        if end <= cursor:
-            continue
-        if not normalized:
-            start = 0.0
-        else:
-            start = max(cursor, start)
-            if start > cursor:
-                previous = normalized[-1]
-                normalized[-1] = (previous[0], previous[1], start, previous[3])
-        if end <= start:
-            continue
-        normalized.append((panel, start, end, item.get("motion")))
-        cursor = end
-
-    if not normalized:
-        narration.close()
-        raise ValueError("Таймлайн не ссылается на существующие изображения")
-    if normalized[-1][2] < audio_duration:
-        panel, start, _end, motion = normalized[-1]
-        normalized[-1] = (panel, start, audio_duration, motion)
+    fps = int(fps) if int(fps) in compositor.FPS_OPTIONS else 30
+    seconds_per_panel = duration / len(panels)
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
     clips = []
-    final = None
-    video = None
-    bgm = None
+    final_video = None
     try:
-        for index, (panel, start, end, motion) in enumerate(normalized):
-            duration = end - start
-            if duration <= 0:
-                continue
+        for index, panel in enumerate(panels):
             if progress_callback:
-                progress_callback(index + 1, len(normalized), f"Монтаж: кадр {index + 1}/{len(normalized)}")
-
-            motion_map = {
-                "slow_zoom_in": "zoom_in",
-                "slow_zoom_out": "zoom_out",
-                "slow_pan_left": "slide_left",
-                "slow_pan_right": "slide_right",
-            }
-            selected = motion_map.get(motion, animation_style)
-            if animation_style == "none":
-                selected = "none"
-
-            panel_clip = compositor._make_panel_clip(
-                panel, width, height, duration, fps, index,
-                bg_mode, custom_bg_path, selected,
+                progress_callback(index, len(panels), f"Сборка немого видео: кадр {index + 1}/{len(panels)}")
+            motion = animation_style or "auto"
+            if motion == "auto":
+                motion = ("zoom_in", "slide_left", "zoom_out", "slide_right")[index % 4]
+            clip = compositor._make_panel_clip(
+                panel, width, height, seconds_per_panel, fps, index,
+                "blur", None, motion,
             )
-            layers = [panel_clip]
-            try:
-                layers.append(compositor._create_vignette(width, height, duration))
-            except Exception:
-                pass
-            if watermark_path and os.path.isfile(watermark_path):
-                try:
-                    layers.append(compositor._create_watermark(
-                        watermark_path, width, height, duration
-                    ))
-                except Exception:
-                    pass
-            if len(layers) > 1:
-                panel_clip = compositor.CompositeVideoClip(layers)
-            clips.append(panel_clip.with_duration(duration))
+            clips.append(clip.with_duration(seconds_per_panel))
 
-        if not clips:
-            raise RuntimeError("Не удалось отрендерить ни одного изображения")
+        final_video = concatenate_videoclips(clips, method="compose")
+        if abs(float(final_video.duration) - duration) > 1.0 / fps:
+            final_video = final_video.with_duration(duration)
 
-        video = concatenate_videoclips(clips, method="compose")
-        # A final frame-rounding adjustment applies to video only. Narration is
-        # attached as-is and remains the exact master duration.
-        if video.duration > audio_duration:
-            video = video.subclipped(0, audio_duration)
-        elif video.duration < audio_duration:
-            video = video.with_duration(audio_duration)
-
-        final = video.with_audio(narration).with_duration(audio_duration)
-
-        # Background music is optional and mixed underneath the single narration.
-        # It may loop, but the narration file itself is never modified or trimmed.
-        if bgm_path and os.path.isfile(bgm_path):
-            try:
-                bgm = AudioFileClip(bgm_path)
-                if bgm.duration > 0:
-                    if bgm.duration < audio_duration:
-                        loops = int(audio_duration / bgm.duration) + 1
-                        bgm = concatenate_audioclips([bgm] * loops)
-                    bgm = bgm.subclipped(0, audio_duration).with_volume_scaled(
-                        max(0.0, min(1.0, float(bgm_volume)))
-                    )
-                    final = final.with_audio(CompositeAudioClip([narration, bgm]))
-            except Exception as exc:
-                print(f"[FullRecapRenderer] Background music skipped: {exc}")
-
-        out_dir = os.path.dirname(os.path.abspath(output_path))
-        os.makedirs(out_dir, exist_ok=True)
-        bitrate = {"low": "2000k", "medium": "5000k", "high": "8000k"}.get(
-            quality, "5000k"
-        )
-        temp_audio = os.path.join(
-            out_dir, os.path.basename(output_path) + "_TEMP_audio.mp4"
-        )
+        bitrate = {"low": "2500k", "medium": "5000k", "high": "8000k"}.get(quality, "5000k")
         if progress_callback:
-            progress_callback(len(clips), len(clips), "Экспорт MP4…")
-        final.write_videofile(
+            progress_callback(len(panels), len(panels), "Экспорт беззвучного MP4…")
+        final_video.write_videofile(
             output_path,
             fps=fps,
             codec="libx264",
-            audio_codec="aac",
+            audio=False,
             bitrate=bitrate,
             preset="medium",
             threads=4,
             logger=None,
-            temp_audiofile=temp_audio,
-            ffmpeg_params=["-pix_fmt", "yuv420p"],
+            ffmpeg_params=["-pix_fmt", "yuv420p", "-an"],
         )
     finally:
-        if final is not None:
-            final.close()
-        if video is not None:
-            video.close()
-        narration.close()
-        if bgm is not None:
-            try:
-                bgm.close()
-            except Exception:
-                pass
+        if final_video is not None:
+            final_video.close()
         for clip in clips:
             try:
                 clip.close()
@@ -191,5 +157,40 @@ def render_full_recap_video(
                 pass
 
     if not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
-        raise RuntimeError("Видеорендерер не создал итоговый файл")
-    return output_path
+        raise RuntimeError("Не удалось создать немое видео")
+    return {
+        "video_path": output_path,
+        "word_count": word_count,
+        "duration_seconds": duration,
+        "duration_hms": _format_duration(duration),
+        "panel_count": len(panels),
+        "seconds_per_word": 0.72,
+    }
+
+
+def build_silent_recap_export(
+    panels: list[dict[str, Any]],
+    script_text: str,
+    export_dir: str,
+    *,
+    resolution: str = "1080p_landscape",
+    fps: int = 30,
+    quality: str = "medium",
+    animation_style: str = "auto",
+    progress_callback=None,
+) -> dict[str, Any]:
+    """Create script, numbered panels, manifest, and one silent MP4."""
+    export_path = Path(export_dir)
+    export_path.mkdir(parents=True, exist_ok=True)
+    numbered = export_numbered_panels(panels, str(export_path), script_text)
+    video_path = str(export_path / "full_recap_silent.mp4")
+    video = render_silent_recap_video(
+        panels, script_text, video_path,
+        resolution=resolution, fps=fps, quality=quality,
+        animation_style=animation_style, progress_callback=progress_callback,
+    )
+    package = {**numbered, **video, "export_dir": str(export_path)}
+    summary_path = export_path / "export.json"
+    summary_path.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+    package["summary_path"] = str(summary_path)
+    return package
