@@ -94,9 +94,8 @@ function renderProjects(projects) {
 }
 
 function resumeProject(name) {
-  // Load project and determine which mode it was using
+  // Resume an existing Full Recap project.
   APP.projectName = name;
-  // Default to dialogue mode for resume
   selectMode('full_recap');
   APP.currentStep = 2; // jump to review
   renderWizard();
@@ -112,9 +111,8 @@ function selectMode(mode) {
   APP.projectName = '';
   APP.sourceFolder = '';
   APP.projectData = null;
-  // Persist the active pipeline mode so backend steps pick the right
-  // panel list + text field (narration vs dialogue) for this project
-  APP.settings.pipeline_mode = mode;
+  // Save the one active product workflow.
+  APP.settings.pipeline_mode = 'full_recap';
 
   document.getElementById('viewHome').classList.add('hidden');
   document.getElementById('viewWizard').classList.remove('hidden');
@@ -1723,101 +1721,6 @@ function closeCropModal() {
 }
 
 // ─── Step: Review 2 (Text Review) ───────────────────────────────
-function renderReview2Step() {
-  const isNarrated = APP.mode === 'narrated';
-  const body = document.getElementById('stepBody');
-  body.innerHTML = `
-    <div id="chapterNavSlot">${renderChapterNavigation()}</div>
-
-    ${isNarrated ? `
-    <p class="text-sm text-dim mb-1">
-      Review the narration for each art panel (the clean panels without bubble text).
-      Edit the text directly, or hit 🔁 Re-narrate to regenerate just that panel with AI.
-    </p>` : `
-    <p class="text-sm text-dim mb-1">
-      Review the dialogue extracted from each panel's speech bubbles.
-      Этот текст используется как контекст для сценариста. Исправьте ошибки распознавания, чтобы пересказ точнее передавал сюжет.
-    </p>`}
-    <div id="panelTextReviewList" style="margin-top: 20px;">
-      <div class="empty-state">
-        <div class="spinner spinner-lg" style="margin:0 auto 12px"></div>
-        <div class="empty-state-text">Loading ${isNarrated ? 'narration' : 'dialogue text'} review...</div>
-      </div>
-    </div>
-    <div id="panelTextCount" class="text-xs text-dim mt-1"></div>`;
-
-  const actions = document.getElementById('stepActions');
-  actions.innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
-    <div class="step-actions-right">
-      <button class="btn btn-primary" onclick="nextStep()">${isNarrated ? 'Narration Looks Good, Continue →' : 'Text Looks Good, Continue →'}</button>
-    </div>`;
-
-  loadNarrationReview();
-}
-window.renderReview2Step = renderReview2Step;
-
-async function loadNarrationReview() {
-  await loadProjectData(APP.projectName);
-  const isNarrated = APP.mode === 'narrated';
-  const container = document.getElementById('panelTextReviewList');
-
-  if (!isNarrated) {
-    await loadDialogueTextReview(container);
-    return;
-  }
-
-  // ✅ Narrated flow: art panels (Crop 2) carry the narration
-  const panels = APP.projectData?.panels || [];
-  const withNarration = panels.filter(p => p.narration || p.scene_narration);
-  const panelList = withNarration.length > 0 ? panels : [];
-
-  if (panelList.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">🎭</div>
-        <div class="empty-state-text">No narrations yet. Go back and run "Generate Narration" first.</div>
-      </div>`;
-    return;
-  }
-
-  container.innerHTML = `
-    <div style="display: flex; flex-direction: column; gap: 24px; max-height: 620px; overflow-y: auto; padding-right: 8px;">
-      ${panelList.map((p, i) => {
-        const pid = p.panel_id || (i + 1);
-        const filename = p.path ? p.path.split('/').pop() : `${String(pid).padStart(4, '0')}.jpg`;
-        const imgUrl = `/api/panel-image/${encodeURIComponent(APP.projectName)}/${filename}`;
-        const narration = p.narration || p.scene_narration || '';
-        return `
-          <div style="border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--bg-card); display: flex; flex-wrap: wrap; gap: 20px; align-items: start;">
-            <div style="flex: 0 0 180px; max-width: 180px;">
-              <div style="background: rgba(0,0,0,0.7); color: white; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 12px; text-align: center;">
-                Panel #${pid}
-              </div>
-              <img src="${imgUrl}" alt="Panel ${pid}"
-                   style="width: 100%; height: auto; display: block; border-radius: 8px; border: 2px solid var(--border);"
-                   onerror="this.style.display='none'">
-              ${p.text ? `<div style="margin-top:8px; font-size:11px; color:var(--text-dim); max-height:90px; overflow-y:auto;"><strong>Dialogue:</strong><br>${esc(p.text)}</div>` : ''}
-            </div>
-            <div style="flex: 1 1 320px; min-width: 280px;">
-              <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
-                🎭 Narration
-              </div>
-              <textarea id="narr_edit_${pid}" rows="4"
-                style="width:100%; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 14px; font-size: 14px; line-height: 1.6; color: var(--text-primary); resize: vertical; font-family: inherit;">${esc(narration)}</textarea>
-              <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-                <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px;" onclick="savePanelNarration(${pid})">💾 Save Text</button>
-                <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px;" onclick="renarratePanel(${pid})" id="btnRenarr_${pid}">🔁 Re-narrate this panel</button>
-                <span id="narr_status_${pid}" class="text-xs text-dim" style="align-self:center;"></span>
-              </div>
-            </div>
-          </div>`;
-      }).join('')}
-    </div>`;
-  document.getElementById('panelTextCount').textContent = `${panelList.length} narrated panel(s)`;
-}
-
-// ─── Dialogue mode: review the EXTRACTED dialogue per bubble panel ──────
 async function loadDialogueTextReview(container) {
   const pwt = APP.projectData?.panels_with_text || [];
 
@@ -1880,50 +1783,6 @@ async function savePanelDialogue(panelId) {
   } catch (e) {
     if (status) status.textContent = '✗ save failed';
     toast('Save failed: ' + e.message, 'error');
-  }
-}
-
-async function savePanelNarration(panelId) {
-  const text = (document.getElementById(`narr_edit_${panelId}`) || {}).value ?? '';
-  const status = document.getElementById(`narr_status_${panelId}`);
-  try {
-    const r = await fetch(`/api/panels/${encodeURIComponent(APP.projectName)}/${panelId}/narration`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ narration: text }),
-    });
-    if (!r.ok) throw new Error((await r.json()).error || r.status);
-    if (status) status.textContent = '✓ saved';
-    toast(`Panel #${panelId} narration saved`, 'success');
-  } catch (e) {
-    if (status) status.textContent = '✗ save failed';
-    toast('Save failed: ' + e.message, 'error');
-  }
-}
-
-async function renarratePanel(panelId) {
-  const status = document.getElementById(`narr_status_${panelId}`);
-  const btn = document.getElementById(`btnRenarr_${panelId}`);
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Re-narrating…'; }
-  if (status) status.textContent = 'AI is re-narrating this panel…';
-  try {
-    const r = await fetch(`/api/panels/${encodeURIComponent(APP.projectName)}/${panelId}/regenerate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || r.status);
-    if (!data.narration || data.narration.startsWith('[')) throw new Error(data.narration || 'model returned empty');
-    const ta = document.getElementById(`narr_edit_${panelId}`);
-    if (ta) ta.value = data.narration;
-    if (status) status.textContent = '✓ re-narrated';
-    toast(`Panel #${panelId} re-narrated`, 'success');
-  } catch (e) {
-    if (status) status.textContent = '✗ re-narrate failed';
-    toast('Re-narrate failed: ' + e.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔁 Re-narrate this panel'; }
   }
 }
 
