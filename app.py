@@ -602,16 +602,7 @@ def run_step(step_name):
     project_name = data.get('project_name', '')
     step_map = {
         'load': lambda: _load_with_settings(project_name, data.get('source_folder', ''), data.get('settings', {})),
-        # Existing AniFlow image pipeline: use its Crop 2 output once.
-        'stitch': lambda: orchestrator.step_stitch(PipelineState.load(project_name)),
-        'detect1': lambda: orchestrator.step_detect_bubble_text(PipelineState.load(project_name)),
-        'crop1': lambda: orchestrator.step_crop_bubble_text_panels(PipelineState.load(project_name)),
-        'stitch2': lambda: orchestrator.step_stitch_bubble_panels(PipelineState.load(project_name)),
-        'detect2': lambda: orchestrator.step_detect_art_panels(PipelineState.load(project_name)),
-        'crop2': lambda: orchestrator.step_crop_art_panels(PipelineState.load(project_name)),
-        'extract_text': lambda: orchestrator.step_extract_dialogue_text(PipelineState.load(project_name)),
-        'extract_dialogue': lambda: orchestrator.step_extract_dialogue_text(PipelineState.load(project_name)),
-        # Full Recap Studio: prepare existing panels once, then script, silent video and YouTube package.
+        # The original AniFlow image/OCR stages are invoked internally by one preparation command.
         'full_recap_prepare': lambda: orchestrator.step_full_recap_prepare(PipelineState.load(project_name)),
         'full_recap_script': lambda: _run_with_settings(orchestrator.step_full_recap_script, project_name, data),
         'full_recap_video': lambda: _run_with_settings(orchestrator.step_full_recap_video, project_name, data),
