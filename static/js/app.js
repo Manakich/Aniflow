@@ -267,7 +267,7 @@ function renderAnalyzeResult(data) {
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
             <div class="badge badge-success" style="font-size:13px; font-weight:600;">✓ доступно глав: ${data.total_chapters}</div>
             <div class="badge" style="background:var(--paper); border:1px solid var(--blue); color:var(--blue); font-size:13px;">
-              📊 Ch.${firstCh} → Ch.${lastCh}
+              📊 Главы ${firstCh} → ${lastCh}
             </div>
           </div>
         </div>
@@ -280,7 +280,7 @@ function renderAnalyzeResult(data) {
             <input type="text" class="form-input" id="inputChapterRange" style="flex:1; font-weight:600;"
                    placeholder="Например: 23, 23-67 или 1,5,10" value="${Math.round(firstCh)}">
             <button class="btn btn-primary" onclick="downloadChapters()" id="btnDownload" style="font-weight:600; padding:10px 20px;">
-              📥 Download
+              📥 Скачать главы
             </button>
           </div>
           <div class="text-xs" style="color:var(--text-secondary); margin-top:6px; line-height:1.5;">
@@ -349,7 +349,7 @@ async function downloadChapters() {
   const progressEl = document.getElementById('downloadProgress');
   progressEl.classList.remove('hidden');
 
-  toast(`Downloading ${chapters.length} chapter(s)...`, 'info');
+  toast(`Скачиваю глав: ${chapters.length}…`, 'info');
 
   try {
     const r = await fetch('/api/scraper/download', {
@@ -365,7 +365,7 @@ async function downloadChapters() {
   } catch (e) {
     toast('Ошибка скачивания: ' + e.message, 'error');
     btn.disabled = false;
-    btn.innerHTML = '📥 Download';
+    btn.innerHTML = '📥 Скачать главы';
     SCRAPER.downloading = false;
   }
 }
@@ -376,7 +376,7 @@ socket.on('step_complete', function _handleDownload(data) {
 
   SCRAPER.downloading = false;
   const btn = document.getElementById('btnDownload');
-  if (btn) { btn.disabled = false; btn.innerHTML = '📥 Download'; }
+  if (btn) { btn.disabled = false; btn.innerHTML = '📥 Скачать главы'; }
 
   if (data.error) {
     toast('Ошибка загрузки: ' + data.error, 'error');
@@ -391,7 +391,7 @@ socket.on('step_complete', function _handleDownload(data) {
   // Показать результат и автоматически заполнить проект
   const downloaded = result.downloaded || [];
   const resultEl = document.getElementById('downloadResult');
-  const mangaName = (result.manga_name || 'Unknown');
+  const mangaName = (result.manga_name || 'Без названия');
   
   if (resultEl && downloaded.length > 0) {
     resultEl.innerHTML = `
@@ -447,7 +447,7 @@ function selectDownloadedChapter(sel) {
   if (!paths[idx]) return;
 
   const d = paths[idx];
-  const mangaName = SCRAPER.mangaInfo?.manga_name || 'Unknown';
+  const mangaName = SCRAPER.mangaInfo?.manga_name || 'Без названия';
   const chNum = String(d.chapter).padStart(3, '0');
   // Project name is just the manhwa title
   const autoName = mangaName;
@@ -567,7 +567,7 @@ async function startSource() {
     if (d.error) { toast(d.error, 'error'); setRunning(false); return; }
     toast('Главы загружены.', 'success');
   } catch (e) {
-    toast('Failed to load: ' + e.message, 'error');
+    toast('Не удалось загрузить главу: ' + e.message, 'error');
     setRunning(false);
   }
 }
