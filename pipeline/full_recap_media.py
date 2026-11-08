@@ -353,78 +353,105 @@ def generate_thumbnail_variants(
     titles: list[dict[str, str]],
     *,
     api_key: str | None = None,
-    model: str = "gpt-image-2.5-sunburst",
+    model: str = "gpt-image-2",
     base_url: str = "https://api.openai.com/v1",
     progress_callback=None,
 ) -> list[dict[str, Any]]:
-    """Generate three independent reference-guided image edits and overlay captions."""
+    """Generate three reference-guided thumbnail edits through the Images API.
+
+    Reference images are sent as multipart image[] file fields as required by
+    the image edits endpoint. The generated image is returned as base64 JSON.
+    """
     api_key = api_key or os.getenv("OPENAI_API_KEY", "")
     if not api_key:
         raise RuntimeError(
-            "Для генерации обложек добавьте OPENAI_API_KEY в локальное окружение и перезапустите AniFlow."
+            "Для генерации обложек добавьте OPENAI_API_KEY в локальное окружение и перезапустите приложение."
         )
 
     ref_dir = Path(project_dir) / "full_recap" / "references" / "thumbnails"
     reference_paths = [
-        str(p) for p in sorted(ref_dir.iterdir())
-        if p.is_file() and p.suffix.lower() in ALLOWED_IMAGE_EXTENSIONS
+        str(path) for path in sorted(ref_dir.iterdir())
+        if path.is_file() and path.suffix.lower() in ALLOWED_IMAGE_EXTENSIONS
     ] if ref_dir.is_dir() else []
     panel_paths = _choose_panel_reference_paths(visual_context, panels, limit=6)
     image_paths = (reference_paths[:8] + panel_paths)[:MAX_REFERENCE_COUNT]
     if not image_paths:
-        raise RuntimeError("Загрузите хотя бы один референс обложки или подготовьте изображения главы.")
+        raise RuntimeError("Сначала загрузите хотя бы один референс обложки для этого выпуска.")
 
-    images = [{"image_url": _image_as_data_url(path)} for path in image_paths]
     output_dir = Path(project_dir) / "full_recap" / "thumbnails"
     output_dir.mkdir(parents=True, exist_ok=True)
-    generated = []
     endpoint = base_url.rstrip("/") + "/images/edits"
+    generated = []
 
     for index in range(1, 4):
         if progress_callback:
             progress_callback(index - 1, 3, f"Генерация обложки {index}/3…")
-        selected_title = titles[index - 1]
-        payload = {
-            "model": model,
-            "images": images,
-            "prompt": _thumbnail_prompt(index, full_script, selected_title),
-            "size": "1280x720",
-            "quality": "high",
-            "output_format": "png",
-            "n": 1,
-        }
+
+        opened_files = []
+        files = []
         try:
+            for image_path in image_paths:
+                handle = open(image_path, "rb")
+                opened_files.append(handle)
+                mime_type = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".webp": "image/webp",
+                }.get(Path(image_path).suffix.lower(), "application/octet-stream")
+                files.append(("image[]", (Path(image_path).name, handle, mime_type)))
+
+            form_data = {
+                "model": model,
+                "prompt": _thumbnail_prompt(index, full_script, titles[index - 1]),
+                "size": "1280x720",
+                "quality": "high",
+                "output_format": "png",
+                "n": "1",
+            }
             response = requests.post(
                 endpoint,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
+                headers={"Authorization": f"Bearer {api_key}"},
+                data=form_data,
+                files=files,
                 timeout=(45, 900),
             )
             if response.status_code >= 400:
-                detail = response.text[:1500]
-                raise RuntimeError(f"Image API HTTP {response.status_code}: {detail}")
-            result = response.json()
-            data = (result.get("data") or [])
-            if not data or not data[0].get("b64_json"):
-                raise RuntimeError("Image API не вернул b64_json")
+                raise RuntimeError(
+                    f"Images API HTTP {response.status_code}: {response.text[:1500]}"
+                )
+            payload = response.json()
+            items = payload.get("data") or []
+            if not items or not items[0].get("b64_json"):
+                raise RuntimeError("Images API не вернул b64_json с изображением")
+
             raw_path = output_dir / f"thumbnail_{index:02d}_raw.png"
-            raw_path.write_bytes(base64.b64decode(data[0]["b64_json"]))
+            raw_path.write_bytes(base64.b64decode(items[0]["b64_json"]))
             final_path = output_dir / f"thumbnail_{index:02d}.jpg"
             _overlay_thumbnail_text(
-                str(raw_path), selected_title.get("thumbnail_text", ""),
+                str(raw_path),
+                titles[index - 1].get("thumbnail_text", ""),
                 str(final_path),
             )
             raw_path.unlink(missing_ok=True)
+
             generated.append({
                 "index": index,
                 "filename": final_path.name,
                 "path": str(final_path),
-                "title": selected_title["title"],
-                "thumbnail_text": selected_title["thumbnail_text"],
-                "angle": selected_title.get("angle", ""),
+                "title": titles[index - 1]["title"],
+                "thumbnail_text": titles[index - 1]["thumbnail_text"],
+                "angle": titles[index - 1].get("angle", ""),
             })
         except requests.RequestException as exc:
             raise RuntimeError(f"Ошибка соединения с Images API: {exc}") from exc
+        finally:
+            for handle in opened_files:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+
         if progress_callback:
             progress_callback(index, 3, f"Готова обложка {index}/3")
     return generated
