@@ -3057,6 +3057,8 @@ class Orchestrator:
                 vision_model=vision_model,
             )
             state.full_recap_titles = title_result["titles"]
+            state.full_recap_description = title_result["description"]
+            state.full_recap_pinned_comment = title_result["pinned_comment"]
             state.full_recap_selected_title = None
             state.full_recap_package_status = "titles_ready"
             state.save()
@@ -3082,8 +3084,16 @@ class Orchestrator:
             ]
             state.full_recap_package_status = "ready"
             state.error = None
+            package_dir = os.path.join(workspace, "full_recap")
+            os.makedirs(package_dir, exist_ok=True)
+            with open(os.path.join(package_dir, "youtube_package.json"), "w", encoding="utf-8") as f:
+                json.dump({
+                    "titles": state.full_recap_titles,
+                    "description": state.full_recap_description,
+                    "pinned_comment": state.full_recap_pinned_comment,
+                }, f, ensure_ascii=False, indent=2)
             state.save()
-            self._emit_progress('full_recap_package', 6, 6, "Три обложки и три названия готовы.")
+            self._emit_progress('full_recap_package', 6, 6, "Готовы 3 названия, 3 обложки, описание и закреплённый комментарий.")
         except Exception as e:
             state.error = str(e)
             state.full_recap_package_status = "failed"
