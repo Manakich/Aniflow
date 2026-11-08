@@ -109,6 +109,30 @@ def build_panel_context(panels: list[dict[str, Any]], scene_size: int = 20) -> l
     return scenes
 
 
+def merge_chapter_panels(
+    chapter_panels: list[tuple[int, list[dict[str, Any]]]]
+) -> list[dict[str, Any]]:
+    """Merge already-cropped panels from chapters with stable unique IDs.
+
+    Panel files are reused as-is; this helper only adds metadata and does not
+    open, filter, crop, resize or otherwise process image files.
+    """
+    merged: list[dict[str, Any]] = []
+    sequence = 0
+    for chapter_number, panels in chapter_panels:
+        for panel in panels:
+            sequence += 1
+            item = dict(panel)
+            original_id = panel.get("panel_id", sequence)
+            safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(original_id)).strip("_") or str(sequence)
+            item["source_chapter"] = int(chapter_number)
+            item["source_panel_id"] = original_id
+            item["panel_id"] = f"ch{int(chapter_number):05d}_{safe_id}"
+            item["sequence_number"] = sequence
+            merged.append(item)
+    return merged
+
+
 def _flatten_context(scene_contexts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [panel for scene in scene_contexts for panel in scene.get("panels", [])]
 
