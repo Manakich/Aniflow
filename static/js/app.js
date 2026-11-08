@@ -87,8 +87,6 @@ const BATCH_STAGE_META = {
   cropped2:       { label: 'CRP2',     color: '#f0abfc' },
   text_extracted: { label: 'TXT',      color: '#f472b6' },
   text_removed:   { label: 'CLN',      color: '#fb7185' },
-  narrated:       { label: 'NAR',      color: '#fda4af' },
-  audio_done:     { label: 'AUD',      color: '#fb923c' },
   clips_done:     { label: 'DONE',     color: '#34d399' },
   video_done:     { label: 'DONE',     color: '#34d399' },
 };
