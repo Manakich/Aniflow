@@ -163,11 +163,12 @@ class PipelineState:
         self.full_recap_panels = []
         self.full_recap_workspace_dir = None
         self.full_recap_script = ""
-        self.full_recap_visual_cues = []
-        self.full_recap_audio_path = None
-        self.full_recap_word_timestamps = []
-        self.full_recap_timeline = {}
+        self.full_recap_word_count = 0
+        self.full_recap_duration_seconds = 0.0
+        self.full_recap_export_dir = None
         self.full_recap_video_path = None
+        self.full_recap_description = ""
+        self.full_recap_pinned_comment = ""
         self.full_recap_status = "not_started"
         self.full_recap_titles = []
         self.full_recap_selected_title = None
@@ -517,11 +518,12 @@ class PipelineState:
         self.full_recap_panels = data.get('full_recap_panels', [])
         self.full_recap_workspace_dir = data.get('full_recap_workspace_dir')
         self.full_recap_script = data.get('full_recap_script', "")
-        self.full_recap_visual_cues = data.get('full_recap_visual_cues', [])
-        self.full_recap_audio_path = data.get('full_recap_audio_path')
-        self.full_recap_word_timestamps = data.get('full_recap_word_timestamps', [])
-        self.full_recap_timeline = data.get('full_recap_timeline', {})
+        self.full_recap_word_count = data.get('full_recap_word_count', 0)
+        self.full_recap_duration_seconds = data.get('full_recap_duration_seconds', 0.0)
+        self.full_recap_export_dir = data.get('full_recap_export_dir')
         self.full_recap_video_path = data.get('full_recap_video_path')
+        self.full_recap_description = data.get('full_recap_description', "")
+        self.full_recap_pinned_comment = data.get('full_recap_pinned_comment', "")
         self.full_recap_status = data.get('full_recap_status', "not_started")
         self.full_recap_titles = data.get('full_recap_titles', [])
         self.full_recap_selected_title = data.get('full_recap_selected_title')
@@ -600,11 +602,12 @@ class PipelineState:
             'full_recap_panels': self.full_recap_panels,
             'full_recap_workspace_dir': self.full_recap_workspace_dir,
             'full_recap_script': self.full_recap_script,
-            'full_recap_visual_cues': self.full_recap_visual_cues,
-            'full_recap_audio_path': self.full_recap_audio_path,
-            'full_recap_word_timestamps': self.full_recap_word_timestamps,
-            'full_recap_timeline': self.full_recap_timeline,
+            'full_recap_word_count': self.full_recap_word_count,
+            'full_recap_duration_seconds': self.full_recap_duration_seconds,
+            'full_recap_export_dir': self.full_recap_export_dir,
             'full_recap_video_path': self.full_recap_video_path,
+            'full_recap_description': self.full_recap_description,
+            'full_recap_pinned_comment': self.full_recap_pinned_comment,
             'full_recap_status': self.full_recap_status,
             'full_recap_titles': self.full_recap_titles,
             'full_recap_selected_title': self.full_recap_selected_title,
@@ -641,11 +644,12 @@ class PipelineState:
                 'full_recap_panels': self.full_recap_panels,
                 'full_recap_workspace_dir': self.full_recap_workspace_dir,
                 'full_recap_script': self.full_recap_script,
-                'full_recap_visual_cues': self.full_recap_visual_cues,
-                'full_recap_audio_path': self.full_recap_audio_path,
-                'full_recap_word_timestamps': self.full_recap_word_timestamps,
-                'full_recap_timeline': self.full_recap_timeline,
+                'full_recap_word_count': self.full_recap_word_count,
+                'full_recap_duration_seconds': self.full_recap_duration_seconds,
+                'full_recap_export_dir': self.full_recap_export_dir,
                 'full_recap_video_path': self.full_recap_video_path,
+                'full_recap_description': self.full_recap_description,
+                'full_recap_pinned_comment': self.full_recap_pinned_comment,
                 'full_recap_status': self.full_recap_status,
                 'full_recap_titles': self.full_recap_titles,
                 'full_recap_selected_title': self.full_recap_selected_title,
@@ -817,9 +821,10 @@ class PipelineState:
                     master_data = json.load(f)
                 shared_fields = (
                     'full_recap_panel_context', 'full_recap_panels',
-                    'full_recap_workspace_dir', 'full_recap_script', 'full_recap_visual_cues',
-                    'full_recap_audio_path', 'full_recap_word_timestamps',
-                    'full_recap_timeline', 'full_recap_video_path',
+                    'full_recap_workspace_dir', 'full_recap_script',
+                    'full_recap_word_count', 'full_recap_duration_seconds',
+                    'full_recap_export_dir', 'full_recap_video_path',
+                    'full_recap_description', 'full_recap_pinned_comment',
                     'full_recap_status', 'full_recap_titles',
                     'full_recap_selected_title', 'full_recap_thumbnails',
                     'full_recap_package_status',
