@@ -3050,7 +3050,7 @@ class Orchestrator:
             state.save()
 
             image_model = s.get('openai_image_model') or os.getenv(
-                'OPENAI_IMAGE_MODEL', 'gpt-image-2.5-sunburst'
+                'OPENAI_IMAGE_MODEL', 'gpt-image-2'
             )
             thumbnails = generate_thumbnail_variants(
                 state.full_recap_workspace_dir or state.project_dir,
