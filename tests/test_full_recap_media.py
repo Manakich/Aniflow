@@ -101,7 +101,12 @@ def test_generate_three_reference_guided_thumbnails_with_exact_16_9_size(monkeyp
             return {"data": [{"b64_json": image_b64}]}
 
     def fake_post(url, **kwargs):
-        calls.append({"url": url, "payload": kwargs["json"]})
+        calls.append({"url": url, "data": kwargs["data"], "files": kwargs["files"], "headers": kwargs["headers"]})
+        assert "json" not in kwargs
+        assert kwargs["data"]["model"] == "gpt-image-2"
+        assert kwargs["data"]["size"] == "1280x720"
+        assert len(kwargs["files"]) >= 2
+        assert all(field == "image[]" for field, _value in kwargs["files"])
         return FakeResponse()
 
     monkeypatch.setattr("pipeline.full_recap_media.requests.post", fake_post)
@@ -117,14 +122,16 @@ def test_generate_three_reference_guided_thumbnails_with_exact_16_9_size(monkeyp
         [{"panel_id": 1, "path": str(panel_path)}],
         titles,
         api_key="test-key",
+        model="gpt-image-2",
     )
 
     assert len(calls) == 3
     assert len(variants) == 3
     assert all(call["url"].endswith("/images/edits") for call in calls)
-    assert all(call["payload"]["size"] == "1280x720" for call in calls)
-    assert all(call["payload"]["n"] == 1 for call in calls)
-    assert len({call["payload"]["prompt"] for call in calls}) == 3
+    assert all(call["data"]["size"] == "1280x720" for call in calls)
+    assert all(call["data"]["n"] == "1" for call in calls)
+    assert len({call["data"]["prompt"] for call in calls}) == 3
+    assert all(call["headers"]["Authorization"] == "Bearer test-key" for call in calls)
     for variant in variants:
         image = Image.open(variant["path"])
         assert image.size == (1280, 720)
