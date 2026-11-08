@@ -3445,7 +3445,7 @@ async function runFullRecapPackage() {
   const settings = {
     pipeline_mode: "full_recap",
     full_recap_title_reference_text: titleText,
-    openai_image_model: document.getElementById("fullRecapImageModel")?.value || "gpt-image-2.5-sunburst",
+    openai_image_model: document.getElementById("fullRecapImageModel")?.value || "gpt-image-2",
   };
   await startFullRecapStep("full_recap_package", settings);
 }
