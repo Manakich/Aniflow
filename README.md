@@ -40,13 +40,13 @@
 ```powershell
 git clone -b feat/full-recap-studio https://github.com/Manakich/Aniflow.git
 cd Aniflow
-setup.bat
+.\setup.bat
 ```
 
 Создайте локальный `.env` на основе `.env.example`, добавьте `OPENAI_API_KEY` для превью и настройте LLM backend (Ollama или совместимый API/9router). Затем выполните:
 
 ```powershell
-python app.py
+.\venv\Scripts\python.exe app.py
 ```
 
 Откройте `http://localhost:8080`.
