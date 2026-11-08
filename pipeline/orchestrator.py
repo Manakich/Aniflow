@@ -3013,24 +3013,12 @@ class Orchestrator:
             vision_model = getattr(self.narrator, 'vision_model', None) or config.VISION_MODEL
 
             workspace = state.full_recap_workspace_dir or state.project_dir
+            # Built-in title and thumbnail style profiles use the three supplied
+            # competitor examples. Episode-specific screenshots are optional
+            # overrides and are never required to generate a package.
             title_refs = list_reference_files(workspace, "titles")
             title_ref_paths = [item["path"] for item in title_refs]
-            title_reference_text = (s.get('full_recap_title_reference_text') or '').strip()
-            if not title_ref_paths and not title_reference_text:
-                state.error = (
-                    "Добавьте референс названия: загрузите скриншот примера "
-                    "или вставьте несколько названий текстом."
-                )
-                state.full_recap_package_status = "missing_title_references"
-                state.save()
-                return state
-
-            thumb_refs = list_reference_files(workspace, "thumbnails")
-            if not thumb_refs:
-                state.error = "Загрузите хотя бы один референс обложки перед генерацией."
-                state.full_recap_package_status = "missing_thumbnail_references"
-                state.save()
-                return state
+            self._emit_progress('full_recap_package', 0, 6, "Подготовка встроенного стиля и материалов выпуска…")
 
             self._emit_progress('full_recap_package', 0, 6, "Подготовка названий и референсов…")
             title_result = generate_title_options(
@@ -3050,7 +3038,7 @@ class Orchestrator:
             state.save()
 
             image_model = s.get('openai_image_model') or os.getenv(
-                'OPENAI_IMAGE_MODEL', 'gpt-image-2'
+                'OPENAI_IMAGE_MODEL', 'gpt-image-2.5-sunburst'
             )
             thumbnails = generate_thumbnail_variants(
                 state.full_recap_workspace_dir or state.project_dir,
