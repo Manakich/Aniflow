@@ -3076,43 +3076,52 @@ function renderFullRecapScriptPreview() {
 function renderFullRecapScriptStep() {
   const body = document.getElementById("stepBody");
   body.innerHTML = `
-    <div class="settings-panel" style="margin-bottom:16px;">
-      <div class="settings-panel-title">🧠 Параметры сценария</div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">🧠 Параметры пересказа</div>
       <div class="form-group">
-        <label class="form-label">Текстовая модель (Ollama / 9router)</label>
-        <input class="form-input" id="fullRecapTextModel" value="qwen2.5:14b" placeholder="qwen2.5:14b или ID модели 9router">
-        <div class="text-xs text-dim mt-1">Модель получает описание всех подготовленных панелей и пишет один связный русский пересказ.</div>
+        <label class="form-label">Текстовая модель</label>
+        <input class="form-input" id="fullRecapTextModel" value="qwen2.5:14b" placeholder="Ollama model или ID модели 9router">
+        <div class="text-xs text-dim mt-1">Сценарий создаётся по всем готовым кадрам и уже извлечённому контексту AniFlow. Дополнительного распознавания/вырезания изображений не будет.</div>
       </div>
       <div class="form-group">
-        <label class="form-label">Стиль пересказа</label>
-        <textarea class="form-input" id="fullRecapStyle" rows="3">Динамичный, живой, разговорный русский пересказ для YouTube. Сильное повествование, понятные переходы между событиями, без канцелярита и повторов.</textarea>
+        <label class="form-label">Целевой объём сценария</label>
+        <select id="fullRecapTargetWords" class="form-select">
+          <option value="5000" selected>5 000 слов — примерно 1 час</option>
+          <option value="7500">7 500 слов — примерно 1 час 30 минут</option>
+          <option value="10000">10 000 слов — примерно 2 часа</option>
+        </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Дополнительный контекст истории (необязательно)</label>
-        <textarea class="form-input" id="fullRecapStoryContext" rows="2" placeholder="Предыстория, правильные имена персонажей, термины и важные детали..."></textarea>
+        <label class="form-label">Контекст истории (необязательно)</label>
+        <textarea id="fullRecapStoryContext" class="form-input" rows="3" placeholder="Правильные имена, предыстория, термины или важные пояснения..."></textarea>
+      </div>
+      <div class="settings-panel" style="background:var(--bg-secondary);">
+        <strong>Профиль повествования</strong>
+        <p class="text-sm mt-1">Подробный последовательный пересказ с эмоциональной подачей, живым разговорным языком, уместной иронией и объяснением способностей, системы, мотивов и последствий. Реплики манги не копируются дословно — сюжет пересказывается авторским текстом.</p>
       </div>
     </div>
     <div class="settings-panel">
-      <div class="settings-panel-title">📜 Полный сценарий</div>
-      <textarea id="fullRecapScriptPreview" class="form-input" rows="12" readonly placeholder="После генерации здесь появится цельный сценарий..."></textarea>
+      <div class="settings-panel-title">📜 Сценарий</div>
+      <textarea id="fullRecapScriptPreview" class="form-input" rows="12" readonly placeholder="После генерации здесь появится полный пересказ..."></textarea>
       <div id="fullRecapScriptMeta" class="text-xs text-dim mt-2">Сценарий ещё не создан.</div>
     </div>`;
 
   document.getElementById("stepActions").innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+    <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
     <div class="step-actions-right">
-      <button class="btn btn-secondary" onclick="runFullRecapScript()">✍️ Сгенерировать единый сценарий</button>
+      <button class="btn btn-secondary" onclick="runFullRecapScript()">✍️ Создать пересказ</button>
       <button class="btn btn-primary" onclick="nextStep()">Проверить сценарий →</button>
     </div>`;
 
   loadFullRecapData().then(data => {
-    if (data) {
-      const model = document.getElementById("fullRecapTextModel");
-      const style = document.getElementById("fullRecapStyle");
-      if (model && data.settings?.full_recap_text_model) model.value = data.settings.full_recap_text_model;
-      if (style && data.settings?.full_recap_style) style.value = data.settings.full_recap_style;
-      renderFullRecapScriptPreview();
-    }
+    if (!data) return;
+    const model = document.getElementById("fullRecapTextModel");
+    const words = document.getElementById("fullRecapTargetWords");
+    const context = document.getElementById("fullRecapStoryContext");
+    if (model && data.settings?.full_recap_text_model) model.value = data.settings.full_recap_text_model;
+    if (words && data.settings?.full_recap_target_words) words.value = String(data.settings.full_recap_target_words);
+    if (context && data.settings?.full_recap_story_context) context.value = data.settings.full_recap_story_context;
+    renderFullRecapScriptPreview();
   });
 }
 
@@ -3120,7 +3129,7 @@ async function runFullRecapScript() {
   const settings = {
     pipeline_mode: "full_recap",
     full_recap_text_model: document.getElementById("fullRecapTextModel")?.value.trim() || "qwen2.5:14b",
-    full_recap_style: document.getElementById("fullRecapStyle")?.value.trim() || "",
+    full_recap_target_words: parseInt(document.getElementById("fullRecapTargetWords")?.value || "5000", 10),
     full_recap_story_context: document.getElementById("fullRecapStoryContext")?.value.trim() || "",
   };
   await startFullRecapStep("full_recap_script", settings);
@@ -3129,27 +3138,36 @@ async function runFullRecapScript() {
 function renderFullRecapReviewStep() {
   const body = document.getElementById("stepBody");
   body.innerHTML = `
-    <p class="text-sm text-dim mb-2">Здесь редактируется весь сценарий целиком. Именно этот текст будет одним запросом отправлен в выбранный TTS-сервис.</p>
+    <p class="text-sm text-dim mb-2">Проверьте и отредактируйте пересказ. После сохранения приложение пересчитает количество слов и длительность немого видео по формуле 0,72 секунды на слово.</p>
     <div class="settings-panel">
-      <div class="settings-panel-title">📝 Единый текст озвучки</div>
-      <textarea id="fullRecapScriptEditor" class="form-input" rows="20" placeholder="Загружаю сценарий..."></textarea>
+      <div class="settings-panel-title">📝 Полный сценарий для озвучки вручную</div>
+      <textarea id="fullRecapScriptEditor" class="form-input" rows="22" placeholder="Загружаю сценарий..."></textarea>
       <div id="fullRecapEditMeta" class="text-xs text-dim mt-2"></div>
-    </div>
-    <div class="text-xs text-dim mt-2">Важно: после ручного изменения текста прежняя карта привязки кадров сбрасывается. Перед монтажом таймлайн будет построен заново по текущему сценарию и доступным изображениям.</div>`;
+    </div>`;
 
   document.getElementById("stepActions").innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+    <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
     <div class="step-actions-right">
-      <button class="btn btn-secondary" onclick="saveFullRecapScript()">💾 Сохранить изменения</button>
-      <button class="btn btn-primary" onclick="nextStep()">К озвучке →</button>
+      <button class="btn btn-secondary" onclick="saveFullRecapScript()">💾 Сохранить сценарий</button>
+      <button class="btn btn-primary" onclick="nextStep()">К созданию видео →</button>
     </div>`;
 
   loadFullRecapData().then(data => {
     const editor = document.getElementById("fullRecapScriptEditor");
     if (editor) editor.value = data?.script || "";
     const meta = document.getElementById("fullRecapEditMeta");
-    if (meta) meta.textContent = data?.script ? `${data.script.length.toLocaleString("ru-RU")} символов` : "Сценарий пока не создан.";
+    if (meta) meta.textContent = data?.script
+      ? `${Number(data.word_count || 0).toLocaleString("ru-RU")} слов · ${formatRecapDuration(data.duration_seconds || 0)}`
+      : "Сценарий пока не создан.";
   });
+}
+
+function formatRecapDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return `${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:${String(secs).padStart(2,"0")}`;
 }
 
 async function saveFullRecapScript() {
@@ -3164,150 +3182,12 @@ async function saveFullRecapScript() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Не удалось сохранить сценарий");
     await loadFullRecapData();
-    toast("Полный сценарий сохранён. Озвучка и таймлайн сброшены для обновлённого текста.", "success");
+    const meta = document.getElementById("fullRecapEditMeta");
+    if (meta) meta.textContent = `${Number(data.word_count || 0).toLocaleString("ru-RU")} слов · ${formatRecapDuration(data.duration_seconds || 0)}`;
+    toast("Сценарий сохранён. Длительность видео пересчитана.", "success");
   } catch (error) {
     toast("Ошибка сохранения: " + error.message, "error");
   }
-}
-
-function renderFullRecapAudioPreview() {
-  const el = document.getElementById("fullRecapAudioPreview");
-  if (!el) return;
-  if (!FULL_RECAP_DATA?.audio_path) {
-    el.innerHTML = '<div class="text-xs text-dim">Полная озвучка ещё не создана.</div>';
-    return;
-  }
-  el.innerHTML = `
-    <div class="settings-panel">
-      <div class="settings-panel-title">🎧 Прослушать единую озвучку</div>
-      <audio controls preload="metadata" style="width:100%;" src="/api/full-recap/${encodeURIComponent(APP.projectName)}/audio"></audio>
-      <div class="text-xs text-dim mt-1">Один аудиофайл на весь выпуск. Изображения будут подстраиваться под эту дорожку.</div>
-    </div>`;
-}
-
-let FULL_RECAP_TIMELINE_PAGE = 0;
-
-function updateFullRecapTimelinePanel(index, panelId) {
-  if (!FULL_RECAP_DATA?.timeline?.entries?.[index]) return;
-  const candidate = (FULL_RECAP_DATA.panels || []).find(
-    panel => String(panel.panel_id) === String(panelId)
-  );
-  if (!candidate) {
-    toast("Выбери кадр из списка подготовленных изображений.", "warning");
-    return;
-  }
-  FULL_RECAP_DATA.timeline.entries[index].panel_id = candidate.panel_id;
-  const image = document.getElementById(`fullRecapTimelineImage_${index}`);
-  if (image) {
-    image.src = `/api/full-recap/${encodeURIComponent(APP.projectName)}/panels/${encodeURIComponent(String(candidate.panel_id))}`;
-  }
-  const label = document.getElementById(`fullRecapTimelinePanelLabel_${index}`);
-  if (label) label.textContent = `Глава ${candidate.source_chapter || "—"} · кадр ${candidate.sequence_number || "—"} · ID ${candidate.panel_id}`;
-}
-
-async function saveFullRecapTimelineEdits() {
-  const entries = FULL_RECAP_DATA?.timeline?.entries || [];
-  if (!entries.length) return toast("Таймлайн пустой.", "error");
-  try {
-    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/timeline`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        entries: entries.map(entry => ({ panel_id: entry.panel_id })),
-      }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Не удалось сохранить визуальные замены");
-    await loadFullRecapData();
-    FULL_RECAP_TIMELINE_PAGE = Math.min(
-      FULL_RECAP_TIMELINE_PAGE,
-      Math.max(0, Math.ceil((FULL_RECAP_DATA?.timeline?.entries?.length || 0) / 24) - 1)
-    );
-    renderFullRecapTimelinePreview();
-    toast(`Сохранено визуальных отрезков: ${data.entries}`.replace("undefined", ""), "success");
-  } catch (error) {
-    toast("Ошибка сохранения таймлайна: " + error.message, "error");
-  }
-}
-
-function changeFullRecapTimelinePage(delta) {
-  const total = FULL_RECAP_DATA?.timeline?.entries?.length || 0;
-  const maxPage = Math.max(0, Math.ceil(total / 24) - 1);
-  FULL_RECAP_TIMELINE_PAGE = Math.max(0, Math.min(maxPage, FULL_RECAP_TIMELINE_PAGE + delta));
-  renderFullRecapTimelinePreview();
-}
-
-function renderFullRecapTimelinePreview() {
-  const el = document.getElementById("fullTimelinePreview");
-  if (!el) return;
-  const timeline = FULL_RECAP_DATA?.timeline;
-  if (!timeline?.entries?.length) {
-    el.innerHTML = '<div class="text-sm text-dim">Таймлайн ещё не построен.</div>';
-    return;
-  }
-  const avg = timeline.entries.reduce((sum, entry) => sum + Number(entry.confidence || 0), 0) / timeline.entries.length;
-  const options = (FULL_RECAP_DATA.panels || []).map(panel => {
-    const label = `Глава ${panel.source_chapter || "—"} · кадр ${panel.sequence_number || "—"} · ${panel.panel_id}`;
-    return `<option value="${esc(String(panel.panel_id))}">${esc(label)}</option>`;
-  }).join("");
-  const pageSize = 24;
-  const maxPage = Math.max(0, Math.ceil(timeline.entries.length / pageSize) - 1);
-  FULL_RECAP_TIMELINE_PAGE = Math.min(FULL_RECAP_TIMELINE_PAGE, maxPage);
-  const pageStart = FULL_RECAP_TIMELINE_PAGE * pageSize;
-  const pageEntries = timeline.entries.slice(pageStart, pageStart + pageSize);
-
-  el.innerHTML = `
-    <div class="settings-panel">
-      <div class="settings-panel-title">🎞️ Визуальный таймлайн</div>
-      <div class="text-sm">${timeline.entries.length} визуальных отрезков · ${Number(timeline.audio_duration || 0).toFixed(1)} сек. · средняя уверенность привязки ${Math.round(avg * 100)}%</div>
-      <div class="text-xs text-dim mt-1">Озвучка остаётся одной непрерывной дорожкой. Во время пауз предыдущий кадр сохраняется на экране. Можно заменить неверный кадр, не меняя время и аудио.</div>
-      <datalist id="fullRecapPanelOptions">${options}</datalist>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px;">
-        ${pageEntries.map((entry,localIndex)=>{
-          const index = pageStart + localIndex;
-          const panel = (FULL_RECAP_DATA.panels || []).find(p => String(p.panel_id) === String(entry.panel_id)) || {};
-          const currentLabel = `Глава ${panel.source_chapter || "—"} · кадр ${panel.sequence_number || "—"} · ID ${entry.panel_id}`;
-          return `
-            <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
-              <img id="fullRecapTimelineImage_${index}" src="/api/full-recap/${encodeURIComponent(APP.projectName)}/panels/${encodeURIComponent(String(entry.panel_id))}" alt="Кадр ${index+1}" loading="lazy" style="display:block;width:100%;height:130px;object-fit:contain;background:#080808;">
-              <div style="padding:8px;font-size:11px;">
-                <strong>Визуальный отрезок ${index+1}</strong>
-                <span class="text-dim" style="display:block;">${Number(entry.start).toFixed(1)}–${Number(entry.end).toFixed(1)} сек. · ${Math.round(Number(entry.confidence || 0)*100)}%</span>
-                <span style="display:block;margin-top:5px;line-height:1.35;min-height:42px;">${esc(entry.cue_text || "Сюжетный визуальный фрагмент")}</span>
-                <span id="fullRecapTimelinePanelLabel_${index}" class="text-xs text-dim" style="display:block;margin-top:6px;">${esc(currentLabel)}</span>
-                <input list="fullRecapPanelOptions" class="form-input" style="font-size:11px;margin-top:6px;" value="${esc(String(entry.panel_id))}" onchange="updateFullRecapTimelinePanel(${index},this.value)" placeholder="Найти другой ID кадра">
-              </div>
-            </div>`;
-        }).join("")}
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:14px;flex-wrap:wrap;">
-        <button class="btn btn-ghost" onclick="changeFullRecapTimelinePage(-1)" ${FULL_RECAP_TIMELINE_PAGE===0?"disabled":""}>← Предыдущие</button>
-        <span class="text-xs text-dim">Страница ${FULL_RECAP_TIMELINE_PAGE+1} из ${maxPage+1} · показаны ${pageStart+1}–${Math.min(pageStart+pageSize,timeline.entries.length)} из ${timeline.entries.length}</span>
-        <button class="btn btn-ghost" onclick="changeFullRecapTimelinePage(1)" ${FULL_RECAP_TIMELINE_PAGE>=maxPage?"disabled":""}>Следующие →</button>
-      </div>
-      <button class="btn btn-secondary" style="margin-top:12px;" onclick="saveFullRecapTimelineEdits()">💾 Сохранить замену кадров</button>
-    </div>`;
-}
-
-function renderFullRecapTimelineStep() {
-  document.getElementById("stepBody").innerHTML = `
-    <p class="text-sm text-dim mb-2">После генерации одной полной озвучки приложение сопоставит текст речи с её временными метками и выберет кадры для смысловых фрагментов. Это нужно только для монтажа — аудио не режется и не изменяется.</p>
-    <div id="fullTimelinePreview" class="mt-2"></div>
-    <div class="progress-container hidden" id="fullTimelineProgress">
-      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="fullTimelineProgressBar"></div></div>
-      <div class="progress-label"><span id="fullTimelineProgressMsg">Синхронизация...</span><span class="pct" id="fullTimelineProgressPct">0%</span></div>
-    </div>`;
-  document.getElementById("stepActions").innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
-    <div class="step-actions-right">
-      <button class="btn btn-secondary" onclick="runFullRecapTimeline()">⏱️ Построить визуальный таймлайн</button>
-      <button class="btn btn-primary" onclick="nextStep()">К экспорту →</button>
-    </div>`;
-  loadFullRecapData().then(data => { if (data) renderFullRecapTimelinePreview(); });
-}
-
-async function runFullRecapTimeline() {
-  await startFullRecapStep("full_recap_timeline");
 }
 
 function renderFullRecapVideoPreview() {
@@ -3315,17 +3195,26 @@ function renderFullRecapVideoPreview() {
   if (!el || !FULL_RECAP_DATA?.video_path) return;
   el.innerHTML = `
     <div class="settings-panel">
-      <div class="settings-panel-title">✅ Готовый ролик</div>
+      <div class="settings-panel-title">✅ Готовое видео без звука</div>
       <video controls preload="metadata" style="width:100%;max-height:520px;background:#000;border-radius:8px;" src="/api/full-recap/${encodeURIComponent(APP.projectName)}/video"></video>
-      <a class="btn btn-primary" style="display:inline-block;margin-top:12px;text-decoration:none;" href="/api/full-recap/${encodeURIComponent(APP.projectName)}/video" download>Скачать MP4</a>
+      <div class="text-sm mt-2">${Number(FULL_RECAP_DATA.word_count || 0).toLocaleString("ru-RU")} слов · ${formatRecapDuration(FULL_RECAP_DATA.duration_seconds || 0)} · ${Number(FULL_RECAP_DATA.panel_count || 0).toLocaleString("ru-RU")} кадров</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+        <a class="btn btn-primary" href="/api/full-recap/${encodeURIComponent(APP.projectName)}/video" download>Скачать MP4</a>
+        <a class="btn btn-secondary" href="/api/full-recap/${encodeURIComponent(APP.projectName)}/export" download>Скачать весь проект</a>
+      </div>
     </div>`;
 }
 
 function renderFullRecapVideoStep() {
   document.getElementById("stepBody").innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">⏱️ Расчёт длительности</div>
+      <div id="fullRecapDurationEstimate" class="text-lg">Загружаю сценарий…</div>
+      <div class="text-xs text-dim mt-1">Формула: количество слов × 0,72 секунды. Все вырезанные кадры будут объединены по порядку с плавным движением. Аудиодорожки в видео не будет.</div>
+    </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Разрешение (YouTube 16:9)</label>
+        <label class="form-label">Разрешение YouTube</label>
         <select id="fullRecapResolution" class="form-select">
           <option value="1080p_landscape" selected>1920 × 1080</option>
           <option value="2k_landscape">2560 × 1440</option>
@@ -3333,45 +3222,34 @@ function renderFullRecapVideoStep() {
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Движение изображений</label>
-        <select id="fullRecapAnimation" class="form-select">
-          <option value="auto" selected>Автоматически менять плавные эффекты</option>
-          <option value="zoom_in">Медленное приближение</option>
-          <option value="zoom_out">Медленное отдаление</option>
-          <option value="slide_left">Плавное движение влево</option>
-          <option value="slide_right">Плавное движение вправо</option>
-          <option value="none">Без движения</option>
+        <label class="form-label">Качество</label>
+        <select id="fullRecapQuality" class="form-select">
+          <option value="medium" selected>Обычное</option>
+          <option value="high">Высокое</option>
         </select>
       </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Фоновая музыка (необязательно)</label>
-      <input id="fullRecapBgmPath" class="form-input" placeholder="Путь к аудиофайлу или имя файла из assets/bgm">
-      <div class="text-xs text-dim mt-1">Музыка автоматически зацикливается при необходимости и звучит тише диктора.</div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Громкость фоновой музыки</label>
-      <input id="fullRecapBgmVolume" type="range" min="0" max="0.35" step="0.01" value="0.12">
     </div>
     <div id="fullRecapVideoPreview" class="mt-2"></div>
     <div class="progress-container hidden" id="fullVideoProgress">
       <div class="progress-bar-wrap"><div class="progress-bar-fill" id="fullVideoProgressBar"></div></div>
-      <div class="progress-label"><span id="fullVideoProgressMsg">Рендеринг...</span><span class="pct" id="fullVideoProgressPct">0%</span></div>
+      <div class="progress-label"><span id="fullVideoProgressMsg">Рендеринг немого видео…</span><span class="pct" id="fullVideoProgressPct">0%</span></div>
     </div>`;
   document.getElementById("stepActions").innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
+    <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
     <div class="step-actions-right">
-      <button class="btn btn-primary" onclick="runFullRecapVideo()">🎬 Создать готовое видео</button>
-      <button class="btn btn-secondary" onclick="nextStep()">К обложкам и названиям →</button>
+      <button class="btn btn-primary" onclick="runFullRecapVideo()">🎬 Создать немое видео</button>
+      <button class="btn btn-secondary" onclick="nextStep()">К оформлению →</button>
     </div>`;
   loadFullRecapData().then(data => {
     if (!data) return;
-    if (data.video_path) renderFullRecapVideoPreview();
+    const estimate = document.getElementById("fullRecapDurationEstimate");
+    if (estimate) estimate.textContent = `${Number(data.word_count || 0).toLocaleString("ru-RU")} слов → ${formatRecapDuration(data.duration_seconds || 0)}`;
     const settings = data.settings || {};
     const resolution = document.getElementById("fullRecapResolution");
-    const animation = document.getElementById("fullRecapAnimation");
+    const quality = document.getElementById("fullRecapQuality");
     if (resolution && settings.video_resolution) resolution.value = settings.video_resolution;
-    if (animation && settings.animation_style) animation.value = settings.animation_style;
+    if (quality && settings.video_quality) quality.value = settings.video_quality;
+    if (data.video_path) renderFullRecapVideoPreview();
   });
 }
 
@@ -3379,13 +3257,12 @@ async function runFullRecapVideo() {
   const settings = {
     pipeline_mode: "full_recap",
     video_resolution: document.getElementById("fullRecapResolution")?.value || "1080p_landscape",
-    animation_style: document.getElementById("fullRecapAnimation")?.value || "auto",
-    bgm_path: document.getElementById("fullRecapBgmPath")?.value.trim() || "",
-    bgm_volume: parseFloat(document.getElementById("fullRecapBgmVolume")?.value || "0.12"),
+    video_quality: document.getElementById("fullRecapQuality")?.value || "medium",
+    video_fps: 30,
+    animation_style: "auto",
   };
   await startFullRecapStep("full_recap_video", settings);
 }
-
 
 let FULL_RECAP_PACKAGE_DATA = null;
 
@@ -4622,8 +4499,6 @@ socket.on('step_complete', (data) => {
   if (String(data.step || '').startsWith('full_recap_')) {
     loadFullRecapData().then(() => {
       if (data.step === 'full_recap_script') renderFullRecapScriptPreview();
-      if (data.step === 'full_recap_audio') renderFullRecapAudioPreview();
-      if (data.step === 'full_recap_timeline') renderFullRecapTimelinePreview();
       if (data.step === 'full_recap_video') renderFullRecapVideoPreview();
       if (data.step === 'full_recap_package') loadFullRecapPackageData().then(() => renderFullRecapPackagePreview());
     });
