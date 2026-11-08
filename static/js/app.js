@@ -2452,21 +2452,6 @@ async function startFullRecapStep(step, settings = {}) {
   }
 }
 
-function renderFullRecapScriptPreview() {
-  const el = document.getElementById("fullRecapScriptPreview");
-  if (!el) return;
-  const text = FULL_RECAP_DATA?.script || "";
-  el.value = text;
-  const meta = document.getElementById("fullRecapScriptMeta");
-  if (meta) {
-    const words = Number(FULL_RECAP_DATA?.word_count || (text.match(/[A-Za-zА-Яа-яЁё0-9]+(?:[’'-][A-Za-zА-Яа-яЁё0-9]+)*/gu) || []).length);
-    const duration = Number(FULL_RECAP_DATA?.duration_seconds || words * 0.72);
-    meta.textContent = text
-      ? `${words.toLocaleString("ru-RU")} слов · расчётная длительность немого видео: ${formatRecapDuration(duration)}`
-      : "Сценарий ещё не создан.";
-  }
-}
-
 function renderFullRecapPrepareStep() {
   const body = document.getElementById("stepBody");
   body.innerHTML = `
