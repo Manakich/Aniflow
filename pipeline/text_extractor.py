@@ -266,22 +266,22 @@ def _extract_text_and_description(image_path: str, vision_model: str,
 
     prompt = (
         "Ты анализируешь одну уже вырезанную панель манги/манхвы. "
-        "Верни ДВА раздела строго в указанном формате.\\n\\n"
-        "TEXT:\\n"
-        "- Извлеки читаемые реплики из облачков и текст повествования.\\n"
-        "- Сохраняй только текст латиницей (например, английский перевод).\\n"
-        "- Не выдумывай буквы и слова; если текста нет, напиши NONE.\\n"
-        "- Не включай звуковые эффекты, логотипы, подписи, водяные знаки и кредиты.\\n\\n"
-        "VISUAL:\\n"
-        "- По-русски опиши в 1–2 предложениях, что реально происходит в сцене.\\n"
-        "- Укажи видимые действия персонажей, их эмоции, важные предметы и место действия.\\n"
-        "- Если в кадре несколько персонажей, опиши их расположение и взаимодействие.\\n"
-        "- Не называй персонажей по имени, если имя не видно в панели.\\n"
-        "- Не пересказывай невидимые события и не придумывай мотивы.\\n"
-        "- Если содержание непонятно, честно напиши: Сюжетная деталь неразборчива.\\n\\n"
-        "FORMAT (обязательно):\\n"
-        "TEXT:\\n<реплики или NONE>\\n"
-        "VISUAL:\\n<краткое русское описание>\\n\\n"
+        "Верни ДВА раздела строго в указанном формате.\n\n"
+        "TEXT:\n"
+        "- Извлеки читаемые реплики из облачков и текст повествования.\n"
+        "- Сохраняй только текст латиницей (например, английский перевод).\n"
+        "- Не выдумывай буквы и слова; если текста нет, напиши NONE.\n"
+        "- Не включай звуковые эффекты, логотипы, подписи, водяные знаки и кредиты.\n\n"
+        "VISUAL:\n"
+        "- По-русски опиши в 1–2 предложениях, что реально происходит в сцене.\n"
+        "- Укажи видимые действия персонажей, их эмоции, важные предметы и место действия.\n"
+        "- Если в кадре несколько персонажей, опиши их расположение и взаимодействие.\n"
+        "- Не называй персонажей по имени, если имя не видно в панели.\n"
+        "- Не пересказывай невидимые события и не придумывай мотивы.\n"
+        "- Если содержание непонятно, честно напиши: Сюжетная деталь неразборчива.\n\n"
+        "FORMAT (обязательно):\n"
+        "TEXT:\n<реплики или NONE>\n"
+        "VISUAL:\n<краткое русское описание>\n\n"
         "Не добавляй вступление, объяснения или третий раздел."
     )
 
@@ -329,7 +329,7 @@ def _manga_ocr(image_path: str) -> str:
     return _mocr(image_path)
 
 
-def _parse_vision_response(raw: str) -> tuple[str, str]:
+def _parse_vision_respdef _parse_vision_response(raw: str) -> tuple[str, str]:
     """Parse structured TEXT and Russian VISUAL sections from one vision request."""
     raw = (raw or "").strip()
     if not raw:
@@ -338,26 +338,26 @@ def _parse_vision_response(raw: str) -> tuple[str, str]:
     visual_part = ""
     text_part = raw
     match = re.search(
-        r"(?:^|\\n)\\s*(?:VISUAL|DESCRIPTION|ОПИСАНИЕ)\\s*:\\s*(.*)$",
+        r"(?:^|\n)\s*(?:VISUAL|DESCRIPTION|ОПИСАНИЕ)\s*:\s*(.*)$",
         raw,
         flags=re.IGNORECASE | re.DOTALL,
     )
     if match:
         visual_part = match.group(1).strip()
         text_part = raw[:match.start()].strip()
-    text_part = re.sub(r"^\\s*TEXT\\s*:\\s*", "", text_part, flags=re.IGNORECASE)
-    visual_part = re.sub(r"^\\s*(?:VISUAL|DESCRIPTION|ОПИСАНИЕ)\\s*:\\s*", "", visual_part, flags=re.IGNORECASE)
-    visual_part = re.sub(r"\\s+", " ", visual_part).strip()
+    text_part = re.sub(r"^\s*TEXT\s*:\s*", "", text_part, flags=re.IGNORECASE)
+    visual_part = re.sub(r"^\s*(?:VISUAL|DESCRIPTION|ОПИСАНИЕ)\s*:\s*", "", visual_part, flags=re.IGNORECASE)
+    visual_part = re.sub(r"\s+", " ", visual_part).strip()
     if visual_part.upper() in {"NONE", "N/A", "НЕРАЗБОРЧИВО", "НЕТ"}:
         visual_part = ""
 
     text_lines = []
-    for line in text_part.split("\\n"):
+    for line in text_part.split("\n"):
         line = line.strip()
         if not line or line.upper() in ("NONE", "N/A", "NO TEXT", "NO TEXT DETECTED"):
             continue
         line = re.sub(
-            r"^(?:TEXT|SPEAKER|NARRATOR|UNKNOWN|CHARACTER)\\s*[:：]\\s*",
+            r"^(?:TEXT|SPEAKER|NARRATOR|UNKNOWN|CHARACTER)\s*[:：]\s*",
             "",
             line,
             flags=re.IGNORECASE,
@@ -365,9 +365,9 @@ def _parse_vision_response(raw: str) -> tuple[str, str]:
         if not line:
             continue
 
-        # The current Manga/Manhwa source workflow commonly uses English-translated
-        # panels. Non-Latin text is skipped rather than being hallucinated or mangled.
-        line = re.sub(r"[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FFF\\uAC00-\\uD7AF]+", "", line)
+        # Current source material is usually available in English translation.
+        # Non-Latin text is skipped rather than mangled or hallucinated.
+        line = re.sub(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]+", "", line)
         line = line.strip()
         alpha_chars = sum(1 for char in line if char.isalpha())
         latin_chars = sum(1 for char in line if char.isalpha() and ord(char) < 0x0370)
@@ -375,9 +375,7 @@ def _parse_vision_response(raw: str) -> tuple[str, str]:
             continue
         text_lines.append(line)
 
-    return "\\n".join(text_lines), visual_part
-
-# ═══════════════════════════════════════════════════════════════════
+    return "\n".join(text_lines), visual_part═════════════════════════════════════════════════
 # Model resolution
 # ═══════════════════════════════════════════════════════════════════
 
