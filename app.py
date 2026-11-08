@@ -296,56 +296,40 @@ def browse_folder():
 
 @app.route('/api/full-recap/<project_name>', methods=['GET'])
 def get_full_recap(project_name):
-    """Return full-recap artefacts without changing the legacy project payload."""
+    """Return script, numbered-panel metadata, silent video and YouTube package."""
     state = PipelineState.load(project_name)
+    panels = state.full_recap_panels or state.panels
     return jsonify({
         'status': state.full_recap_status,
         'script': state.full_recap_script,
-        'visual_cues': state.full_recap_visual_cues,
-        'audio_path': state.full_recap_audio_path,
-        'timeline': state.full_recap_timeline,
+        'word_count': state.full_recap_word_count,
+        'duration_seconds': state.full_recap_duration_seconds,
+        'video_path': state.full_recap_video_path,
+        'export_dir': state.full_recap_export_dir,
+        'panel_count': len(panels),
         'panels': [
             {
                 'panel_id': panel.get('panel_id'),
-                'sequence_number': context_panel.get('sequence_number'),
+                'sequence_number': panel.get('sequence_number', index),
                 'source_chapter': panel.get('source_chapter'),
             }
-            for panel in (state.full_recap_panels or state.panels)
-            for context_panel in [
-                next((
-                    item for scene in state.full_recap_panel_context
-                    if scene.get('scene_id') != 'filter_summary'
-                    for item in scene.get('panels', [])
-                    if str(item.get('panel_id')) == str(panel.get('panel_id'))
-                ), {})
-            ]
-            if context_panel and panel.get('panel_id') is not None
+            for index, panel in enumerate(panels, start=1)
         ],
-        'video_path': state.full_recap_video_path,
         'titles': state.full_recap_titles,
         'selected_title': state.full_recap_selected_title,
         'thumbnails': [
             {key: value for key, value in item.items() if key != 'path'}
             for item in state.full_recap_thumbnails
         ],
+        'description': state.full_recap_description,
+        'pinned_comment': state.full_recap_pinned_comment,
         'package_status': state.full_recap_package_status,
-        'panel_count': len(state.full_recap_panels or state.panels),
-        'kept_panel_count': sum(
-            len(scene.get('panels', [])) for scene in state.full_recap_panel_context
-            if scene.get('scene_id') != 'filter_summary'
-        ),
-        'skipped_panel_count': next((
-            scene.get('skipped_count', 0) for scene in state.full_recap_panel_context
-            if scene.get('scene_id') == 'filter_summary'
-        ), 0),
         'settings': {
-            'tts_engine': state.settings.get('tts_engine', 'edge'),
-            'tts_voice': state.settings.get('tts_voice', ''),
             'full_recap_text_model': state.settings.get('full_recap_text_model', ''),
             'full_recap_style': state.settings.get('full_recap_style', ''),
-            'full_recap_elevenlabs_model': state.settings.get(
-                'full_recap_elevenlabs_model', 'eleven_flash_v2_5'
-            ),
+            'full_recap_target_words': state.settings.get('full_recap_target_words', 5000),
+            'video_resolution': state.settings.get('video_resolution', '1080p_landscape'),
+            'animation_style': state.settings.get('animation_style', 'auto'),
         },
     })
 
@@ -401,6 +385,8 @@ def get_full_recap_package(project_name):
             'status': state.full_recap_package_status,
             'titles': state.full_recap_titles,
             'selected_title': state.full_recap_selected_title,
+            'description': state.full_recap_description,
+            'pinned_comment': state.full_recap_pinned_comment,
             'thumbnails': [
                 {key: value for key, value in item.items() if key != 'path'}
                 for item in state.full_recap_thumbnails
@@ -463,73 +449,6 @@ def serve_full_recap_thumbnail(project_name, filename):
     return send_from_directory(folder, safe_name)
 
 
-@app.route('/api/full-recap/<project_name>/audio', methods=['GET'])
-def serve_full_recap_audio(project_name):
-    """Stream the one continuous Full Recap narration file."""
-    state = PipelineState.load(project_name)
-    path = state.full_recap_audio_path
-    if not path or not os.path.isfile(path):
-        return jsonify({'error': 'Full Recap audio has not been generated yet'}), 404
-    return send_file(path, mimetype='audio/mpeg', as_attachment=False)
-
-
-@app.route('/api/full-recap/<project_name>/panels/<path:panel_id>', methods=['GET'])
-def serve_full_recap_panel(project_name, panel_id):
-    """Serve only an image referenced by the current Full Recap project state."""
-    state = PipelineState.load(project_name)
-    panel = next((
-        item for item in (state.full_recap_panels or state.panels)
-        if str(item.get('panel_id')) == str(panel_id)
-    ), None)
-    image_path = panel.get('path') if panel else None
-    if not image_path or not os.path.isfile(image_path):
-        return jsonify({'error': 'Full Recap panel image not found'}), 404
-    import mimetypes
-    mime_type = mimetypes.guess_type(image_path)[0] or 'application/octet-stream'
-    return send_file(image_path, mimetype=mime_type, conditional=True)
-
-
-@app.route('/api/full-recap/<project_name>/timeline', methods=['PUT'])
-def update_full_recap_timeline(project_name):
-    """Update selected visual panels without changing audio or timestamp boundaries."""
-    data = request.get_json(silent=True) or {}
-    requested = data.get('entries')
-    if not isinstance(requested, list):
-        return jsonify({'error': 'Ожидается список entries'}), 400
-
-    state = PipelineState.load(project_name)
-    current = (state.full_recap_timeline or {}).get('entries') or []
-    if len(requested) != len(current):
-        return jsonify({'error': 'Количество визуальных отрезков изменилось. Перезагрузите таймлайн.'}), 409
-
-    kept_ids = {
-        str(panel.get('panel_id'))
-        for scene in state.full_recap_panel_context
-        if scene.get('scene_id') != 'filter_summary'
-        for panel in scene.get('panels', [])
-        if panel.get('panel_id') is not None
-    }
-    updated = []
-    for index, (original, change) in enumerate(zip(current, requested)):
-        if not isinstance(change, dict):
-            return jsonify({'error': f'Некорректный отрезок {index + 1}'}), 400
-        panel_id = str(change.get('panel_id') or '')
-        if panel_id not in kept_ids:
-            return jsonify({'error': f'Кадр {panel_id or "(empty)"} не входит в список проверенных изображений'}), 400
-        # Only the selected image is editable here. Keep all original audio timings,
-        # motions, confidence and semantic cue metadata exactly as saved.
-        item = dict(original)
-        item['panel_id'] = panel_id
-        updated.append(item)
-
-    state.full_recap_timeline['entries'] = updated
-    state.full_recap_video_path = None
-    state.full_recap_status = 'timeline_edited'
-    state.error = None
-    state.save()
-    return jsonify({'status': 'saved', 'entries': len(updated)})
-
-
 @app.route('/api/full-recap/<project_name>/video', methods=['GET'])
 def serve_full_recap_video(project_name):
     """Stream the rendered Full Recap MP4."""
@@ -542,24 +461,36 @@ def serve_full_recap_video(project_name):
 
 @app.route('/api/full-recap/<project_name>/script', methods=['PUT'])
 def update_full_recap_script(project_name):
-    """Save the user-edited complete script. Does not call TTS or any AI API."""
+    """Save an edited recap script and recalculate its silent-video duration."""
+    from pipeline.recap_script_writer import count_words, target_video_duration_seconds
     data = request.get_json(silent=True) or {}
     full_text = str(data.get('full_text') or '').strip()
     if not full_text:
         return jsonify({'error': 'Сценарий не может быть пустым'}), 400
+
     state = PipelineState.load(project_name)
     state.full_recap_script = full_text
-    # Old cue spans may no longer match edited text. Clear them so the timeline
-    # builder uses the explicit chronological fallback instead of stale offsets.
-    state.full_recap_visual_cues = []
-    state.full_recap_word_timestamps = []
-    state.full_recap_timeline = {}
-    state.full_recap_audio_path = None
+    state.full_recap_word_count = count_words(full_text)
+    state.full_recap_duration_seconds = target_video_duration_seconds(state.full_recap_word_count)
     state.full_recap_video_path = None
+    state.full_recap_export_dir = None
     state.full_recap_status = 'script_edited'
     state.error = None
+
+    workspace = state.full_recap_workspace_dir or state.project_dir
+    script_dir = os.path.join(workspace, 'full_recap')
+    os.makedirs(script_dir, exist_ok=True)
+    with open(os.path.join(script_dir, 'script.txt'), 'w', encoding='utf-8') as file:
+        file.write(full_text + '\\n')
     state.save()
-    return jsonify({'status': 'saved', 'characters': len(full_text)})
+    return jsonify({
+        'status': 'saved',
+        'characters': len(full_text),
+        'word_count': state.full_recap_word_count,
+        'duration_seconds': state.full_recap_duration_seconds,
+    })
+
+
 
 
 @app.route('/api/projects/<name>/state', methods=['GET'])
@@ -761,8 +692,6 @@ def run_step(step_name):
         'scene_clips': lambda: _run_with_settings(orchestrator.step_export_scene_clips, project_name, data),
         # Full Recap Studio — one script, one audio file, visuals follow speech.
         'full_recap_script': lambda: _run_with_settings(orchestrator.step_full_recap_script, project_name, data),
-        'full_recap_audio': lambda: _run_with_settings(orchestrator.step_full_recap_audio, project_name, data),
-        'full_recap_timeline': lambda: _run_with_settings(orchestrator.step_full_recap_timeline, project_name, data),
         'full_recap_video': lambda: _run_with_settings(orchestrator.step_full_recap_video, project_name, data),
         'full_recap_package': lambda: _run_with_settings(orchestrator.step_full_recap_package, project_name, data),
     }
