@@ -5,6 +5,7 @@ import types
 from pipeline.recap_script_writer import (
     RECAP_STYLE_PROFILE_RU,
     SYSTEM_PROMPT_RU,
+    _allocate_word_targets,
     build_panel_context,
     count_words,
     generate_full_recap_script,
@@ -91,3 +92,17 @@ def test_competitor_blended_profile_is_original_and_paraphrase_focused():
     assert "косвенной" in SYSTEM_PROMPT_RU
     assert "Не копируй" in RECAP_STYLE_PROFILE_RU
     assert "иронией" in RECAP_STYLE_PROFILE_RU
+
+
+
+def test_word_targets_are_exact_and_never_negative_for_many_batches():
+    weights = [100 + (index % 7) for index in range(200)]
+    targets = _allocate_word_targets(weights, 10000)
+    assert len(targets) == len(weights)
+    assert sum(targets) == 10000
+    assert all(target >= 0 for target in targets)
+
+
+def test_word_target_allocator_handles_single_and_empty_batches():
+    assert _allocate_word_targets([10], 5000) == [5000]
+    assert _allocate_word_targets([], 5000) == []
