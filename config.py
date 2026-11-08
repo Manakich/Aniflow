@@ -11,19 +11,17 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # When True (user enables "Speed Mode"), the pipeline switches to:
 #   - VideoToolbox hardware H.264 encoding (macOS) instead of libx264 medium
 #   - Parallel clip encoding workers + clip caching (mtime-based invalidation)
-#   - Concurrent TTS (Edge: 6 workers, ElevenLabs: 2; Kokoro: MPS GPU)
+#   - Parallel legacy clip rendering workers
 #   - Ollama keep_alive so the LLM stays loaded between panels
 # Individual steps read this flag at runtime; the toggle is stored per project
 # in PipelineState.settings['fast_mode'] and propagated here by the orchestrator.
 SPEED_MODE = False
 
 # ⚡ Speed Mode tunables (resolved from state.settings by the orchestrator).
-# Keys: clip_workers, encoder, edge_workers, elevenlabs_workers, kokoro_gpu
+# Keys: clip_workers, encoder
 SPEED_SETTINGS = {}
 
-# ⚡ Concurrency for the AI steps (extraction + narration Phase 1) when Speed
-# Mode is ON. 2 is the sweet spot for Ollama on Apple Silicon — the runner
-# batches requests without thrashing the KV cache. Override via env var.
+# ⚡ Concurrency for image/text extraction when Speed Mode is ON.
 AI_SPEED_WORKERS = int(os.getenv("AI_SPEED_WORKERS", "2"))
 
 # ─── Top-level organisation ──────────────────────────────────────
@@ -42,7 +40,6 @@ MANHWA_STITCH_DIR   = os.path.join(BASE_DIR, "manhwa_stitch")    # Stitched full
 MANHWA_DETECT_DIR   = os.path.join(BASE_DIR, "manhwa_detect")    # Detection metadata
 MANHWA_CROP_DIR     = os.path.join(BASE_DIR, "manhwa_crop")      # Cropped panels
 MANHWA_TEXT_DIR     = os.path.join(BASE_DIR, "manhwa_text")      # Extracted text
-MANHWA_AUDIO_DIR    = os.path.join(BASE_DIR, "manhwa_audio")     # Generated audio
 MANHWA_CLIPS_DIR    = os.path.join(BASE_DIR, "manhwa_clips")     # Final video clips
 
 # Legacy folders (kept for backward compatibility)
@@ -51,8 +48,6 @@ MANHWA_PANEL_DIR             = os.path.join(OUTPUT_DIR, "manhwa_panel")
 MANHWA_PANEL_WITH_BUBBLE_DIR = os.path.join(OUTPUT_DIR, "Manhwa_panel_with_bubble")
 PANEL_BUBBLE_DIR             = os.path.join(OUTPUT_DIR, "panel_bubble")
 EXTRACTED_TXT_DIR            = os.path.join(OUTPUT_DIR, "extracted_txt")
-NARRATION_DIR                = os.path.join(OUTPUT_DIR, "narration")
-AUDIO_OUTPUT_DIR             = os.path.join(OUTPUT_DIR, "audio")
 VIDEO_OUTPUT_DIR             = os.path.join(OUTPUT_DIR, "video")
 
 # Ensure directories exist
@@ -60,22 +55,20 @@ for d in [INPUT_DIR, OUTPUT_DIR, MODELS_DIR, TEMP_DIR, ASSETS_DIR, CAST_DIR,
           PROJECTS_DIR,
           # New organized folders
           MANHWA_DOWNLOAD_DIR, MANHWA_STITCH_DIR, MANHWA_DETECT_DIR,
-          MANHWA_CROP_DIR, MANHWA_TEXT_DIR, MANHWA_AUDIO_DIR, MANHWA_CLIPS_DIR,
+          MANHWA_CROP_DIR, MANHWA_TEXT_DIR, MANHWA_CLIPS_DIR,
           # Legacy folders
           RAW_MANHWA_DIR,
           MANHWA_PANEL_DIR, MANHWA_PANEL_WITH_BUBBLE_DIR,
-          PANEL_BUBBLE_DIR, EXTRACTED_TXT_DIR, NARRATION_DIR,
-          AUDIO_OUTPUT_DIR, VIDEO_OUTPUT_DIR]:
+          PANEL_BUBBLE_DIR, EXTRACTED_TXT_DIR, VIDEO_OUTPUT_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Sub-asset directories
-BGM_DIR = os.path.join(ASSETS_DIR, "bgm")
 WATERMARK_DIR = os.path.join(ASSETS_DIR, "watermarks")
 BACKGROUNDS_DIR = os.path.join(ASSETS_DIR, "backgrounds")
 INTROS_DIR = os.path.join(ASSETS_DIR, "intros")
 OUTROS_DIR = os.path.join(ASSETS_DIR, "outros")
 
-for d in [BGM_DIR, WATERMARK_DIR, BACKGROUNDS_DIR, INTROS_DIR, OUTROS_DIR]:
+for d in [WATERMARK_DIR, BACKGROUNDS_DIR, INTROS_DIR, OUTROS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # ─── YOLO Panel Detection ─────────────────────────────────────────
@@ -132,32 +125,6 @@ Focus on: what's happening, character emotions, and any tension or action.
 If there are speech bubbles, incorporate the dialogue naturally into the narration.
 Write ONLY the narration text, nothing else."""
 
-# ─── TTS Settings ────────────────────────────────────────────────
-TTS_ENGINE = "edge"  # "edge", "kokoro", or "elevenlabs"
-TTS_VOICE = "en-US-ChristopherNeural"  # Deep male narrator voice
-TTS_RATE = "-5%"  # Slightly slower for drama
-TTS_PITCH = "-2Hz"
-
-# Kokoro TTS settings
-KOKORO_MODEL_DIR = os.path.join(BASE_DIR, "models", "kokoro")
-KOKORO_VOICE = "af_bella"  # Default Kokoro voice
-KOKORO_SPEED = 1.0
-
-# ElevenLabs TTS settings
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")  # Set via environment or UI
-ELEVENLABS_MODEL = "eleven_monolingual_v1"  # or "eleven_multilingual_v2"
-ELEVENLABS_VOICE_ID = ""  # Will be set by user in UI
-ELEVENLABS_STABILITY = 0.5  # 0.0-1.0, lower = more variable
-ELEVENLABS_SIMILARITY = 0.75  # 0.0-1.0, higher = closer to original voice
-
-# Available narrator voices (good for recaps):
-# en-US-ChristopherNeural - Deep male (recommended)
-# en-US-GuyNeural - Casual male
-# en-US-DavisNeural - Authoritative male
-# en-US-JennyNeural - Clear female
-# en-GB-RyanNeural - British male
-# en-AU-WilliamNeural - Australian male
-
 # ─── Video Composition ────────────────────────────────────────────
 # Resolution presets
 RESOLUTION_PRESETS = {
@@ -200,11 +167,6 @@ BACKGROUND_COLOR = (10, 10, 15)
 BACKGROUND_COLOR_HEX = "#000000"  # For color and blur_color modes
 COLOR_OVERLAY_OPACITY = 0.5  # For blur_color mode (0.0-1.0)
 
-# BGM settings
-BGM_VOLUME = 0.15  # Background music volume (0-1)
-BGM_FADE_IN = 2.0  # seconds
-BGM_FADE_OUT = 3.0
-
 # Watermark
 WATERMARK_OPACITY = 0.3
 WATERMARK_POSITION = "bottom_right"  # top_left, top_right, bottom_left, bottom_right, center
@@ -216,49 +178,6 @@ MAX_PANEL_HEIGHT = 3000  # Maximum panel height
 GAP_THRESHOLD = 15  # Min white gap between panels (pixels)
 BORDER_COLOR_THRESHOLD = 240  # Consider pixels above this as "white/gap"
 MIN_PANEL_ASPECT_RATIO = 0.2  # width/height minimum
-
-# ─── Auto Pipeline Settings ──────────────────────────────────────
-AUTO_PIPELINE_EXPORT_CLIPS = True   # Export per-panel clips in auto mode
-AUTO_PIPELINE_SILENT_DURATION = 2.0 # Duration (seconds) for panels with no dialogue
-
-# ─── CapCut Export Settings ──────────────────────────────────────
-CAPCUT_SUBTITLE_FONT = "Inter"
-CAPCUT_SUBTITLE_SIZE = 40
-CAPCUT_SUBTITLE_COLOR = "#FFFFFF"
-CAPCUT_SUBTITLE_BG = "rgba(0,0,0,0.6)"
-CAPCUT_IN_ANIMATION = "fade"  # fade, slide_up, zoom, bounce
-CAPCUT_OUT_ANIMATION = "fade"
-
-# ─── Script Rewriter ─────────────────────────────────────────────
-REWRITER_STYLES = {
-    "casual": (
-        "Rewrite like a friend casually explaining the chapter to another friend. "
-        "Natural spoken language, contractions, no theatrics. Connect the events into "
-        "one continuous flow instead of listing them."
-    ),
-    "dramatic": (
-        "Rewrite with more tension and urgency, but still sound like a person talking, "
-        "not a movie trailer. Short punchy sentences, one flowing sequence."
-    ),
-    "epic": (
-        "Rewrite with a grander, more cinematic tone — bigger stakes, weightier words — "
-        "while keeping it spoken and continuous, never purple prose."
-    ),
-    "horror": (
-        "Rewrite with a dark, ominous tone. Build dread through understatement and pacing, "
-        "not exclamation marks. Keep it flowing like a story being told in a quiet room."
-    ),
-    "comedy": (
-        "Rewrite with dry wit. Let the narrator react to absurd or ridiculous moments "
-        "like a friend would ('bro really thought that would work'). Never force a joke "
-        "over actual story information."
-    ),
-    "hype": (
-        "Rewrite like an excited friend who just read the chapter and can't wait to tell "
-        "you about it. High energy, but keep the story clear and continuous."
-    ),
-}
-
 
 # ─── Path Helper Functions ───────────────────────────────────────
 
@@ -278,7 +197,6 @@ def get_manhwa_paths(manhwa_name: str, chapter_num: int) -> dict:
             'detect': 'manhwa_detect/Sword-Devouring-Swordmaster/Chapter_00001/',
             'crop': 'manhwa_crop/Sword-Devouring-Swordmaster/Chapter_00001/',
             'text': 'manhwa_text/Sword-Devouring-Swordmaster/Chapter_00001/',
-            'audio': 'manhwa_audio/Sword-Devouring-Swordmaster/Chapter_00001/',
             'clips': 'manhwa_clips/Sword-Devouring-Swordmaster/Chapter_00001/',
             'state': 'manhwa_download/Sword-Devouring-Swordmaster/Chapter_00001/state.json'
         }
@@ -291,7 +209,6 @@ def get_manhwa_paths(manhwa_name: str, chapter_num: int) -> dict:
         'detect': os.path.join(MANHWA_DETECT_DIR, manhwa_name, chapter_folder),
         'crop': os.path.join(MANHWA_CROP_DIR, manhwa_name, chapter_folder),
         'text': os.path.join(MANHWA_TEXT_DIR, manhwa_name, chapter_folder),
-        'audio': os.path.join(MANHWA_AUDIO_DIR, manhwa_name, chapter_folder),
         'clips': os.path.join(MANHWA_CLIPS_DIR, manhwa_name, chapter_folder),
     }
     
@@ -351,7 +268,6 @@ def chapter_paths(series: str, chapter: str) -> dict:
       manhwa_download/<series>/<chapter>/001.img, 002.img ...
       manhwa_crop/<series>/<chapter>/panel_001.png ...
       manhwa_text/<series>/<chapter>/extracted_text.json
-      manhwa_audio/<series>/<chapter>/panel_001.mp3 ...
       manhwa_clips/<series>/<chapter>/scene_001.mp4 ...
     """
     # Parse chapter number from string (e.g., "Chapter_001" -> 1)

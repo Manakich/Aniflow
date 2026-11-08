@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#E3E5E1">
-<title>AniFlow — Manhwa Recap Studio</title>
-<meta name="description" content="AniFlow — Turn manhwa and webtoon chapters into recap videos with AI narration. Runs entirely on your machine.">
+<title>Recap Studio — пересказы манги и манхвы</title>
+<meta name="description" content="Recap Studio — Russian manga and manhwa recap scripts, numbered panels, silent long-form videos and YouTube packaging.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,weight@12..96,600;12..96,700;12..96,800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
@@ -21,13 +21,11 @@
     <div class="app-logo">
       <img src="/static/logo-small.jpg?v=2" alt="AniFlow logo" width="38" height="38"
            onerror="if (!this.dataset.fallback) { this.dataset.fallback = 1; this.src = '/static/logo-small.png?v=2'; }">
-      <span class="app-logo-text">AniFlow</span>
-      <span class="app-logo-ver">v2</span>
+      <span class="app-logo-text">Recap Studio</span>
     </div>
     <div class="header-status" aria-label="Service status">
       <div class="status-dot"><div class="dot" id="dotOllama"></div> Ollama</div>
       <div class="status-dot"><div class="dot" id="dotFFmpeg"></div> FFmpeg</div>
-      <div class="status-dot"><div class="dot" id="dotTTS"></div> TTS</div>
     </div>
   </header>
 
@@ -37,11 +35,11 @@
     <!-- Panel 1 · Title card -->
     <section class="panel panel-title">
       <div class="panel-title-copy">
-        <div class="bubble-badge">Runs entirely on your machine</div>
-        <h1 class="hero-title">Pages in.<br>Recaps out.</h1>
+        <div class="bubble-badge">Russian manhwa recap production</div>
+        <h1 class="hero-title">Manga in.<br>Recap out.</h1>
         <p class="hero-subtitle">
-          Panel detection, dialogue extraction, AI narration, voiceover and render —
-          one vertical strip from raw chapters to an upload-ready video.
+          Paste a chapter link, reuse AniFlow’s existing panel extraction once,
+          generate an original Russian plot recap, numbered images and a silent long-form video.
         </p>
       </div>
       <div class="panel-title-art" aria-hidden="true">
@@ -84,74 +82,40 @@
 
     <!-- Panel 2 · Mode selection -->
     <section class="panel panel-modes">
-      <h2 class="panel-heading">Pick how the story is told</h2>
+      <h2 class="panel-heading">Recap Studio</h2>
       <div class="mode-selection">
-        <!-- Dialogue Recap -->
-        <div class="mode-card" onclick="selectMode('dialogue')" role="button" tabindex="0"
-             onkeydown="if (event.key==='Enter'||event.key===' ') { event.preventDefault(); selectMode('dialogue'); }">
-          <div class="mode-card-icon dialogue">
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <rect x="9" y="2.5" width="6" height="11" rx="3" fill="#1F4FD8"/>
-              <path d="M5.5 11a6.5 6.5 0 0 0 13 0" stroke="#1F4FD8" stroke-width="2" stroke-linecap="round"/>
-              <path d="M12 17.5V21M8.5 21h7" stroke="#1F4FD8" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </div>
-          <div class="mode-card-title">Dialogue recap</div>
-          <div class="mode-card-desc">
-            Keep speech bubbles visible. Extract dialogue text from panels and convert
-            it directly to audio — let the original lines speak for themselves.
-          </div>
-          <div class="mode-card-steps">
-            <span class="mode-step-tag">Load</span>
-            <span class="mode-step-tag">Stitch</span>
-            <span class="mode-step-tag">Detect</span>
-            <span class="mode-step-tag">Crop</span>
-            <span class="mode-step-tag">Extract text</span>
-            <span class="mode-step-tag">TTS</span>
-            <span class="mode-step-tag">Video</span>
-          </div>
-          <div class="mode-card-cta">Start building</div>
-        </div>
-
-        <!-- Narrated Recap -->
-        <div class="mode-card" onclick="selectMode('narrated')" role="button" tabindex="0"
-             onkeydown="if (event.key==='Enter'||event.key===' ') { event.preventDefault(); selectMode('narrated'); }">
+        <!-- Full Recap Studio -->
+        <div class="mode-card" onclick="selectMode('full_recap')" role="button" tabindex="0"
+             onkeydown="if (event.key==='Enter'||event.key===' ') { event.preventDefault(); selectMode('full_recap'); }">
           <div class="mode-card-icon narrated">
             <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <g transform="rotate(-8 12 7)">
-                <rect x="2" y="4.8" width="20" height="4.4" rx="1" fill="#D7263D"/>
-                <rect x="5" y="4.8" width="2.6" height="4.4" fill="#FFFFFF"/>
-                <rect x="10" y="4.8" width="2.6" height="4.4" fill="#FFFFFF"/>
-                <rect x="15" y="4.8" width="2.6" height="4.4" fill="#FFFFFF"/>
-              </g>
-              <rect x="2" y="11" width="20" height="10" rx="2" fill="#D7263D"/>
-              <path d="M10 13.8l5.2 2.2-5.2 2.2z" fill="#FFFFFF"/>
+              <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z" fill="#D7263D"/>
+              <path d="M8 7h7M8 10h7M8 13h5" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19" stroke="#1B1C1F" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
           </div>
-          <div class="mode-card-title">Narrated recap</div>
+          <div class="mode-card-title">Full Recap Studio</div>
           <div class="mode-card-desc">
-            Remove speech bubbles for clean panels. AI narrates the story like a friend
-            recapping it for you — with Ollama, Gemini, or Claude.
+            Вставьте ссылку на мангу или манхву и получите оригинальный русский пересказ,
+            нумерованные кадры, немое видео и материалы для публикации на YouTube.
           </div>
           <div class="mode-card-steps">
-            <span class="mode-step-tag">Load</span>
-            <span class="mode-step-tag">Stitch</span>
-            <span class="mode-step-tag">Detect</span>
-            <span class="mode-step-tag">Crop</span>
-            <span class="mode-step-tag">Extract</span>
-            <span class="mode-step-tag">Clean</span>
-            <span class="mode-step-tag">Narrate</span>
-            <span class="mode-step-tag">TTS</span>
-            <span class="mode-step-tag">Video</span>
+            <span class="mode-step-tag">Ссылка</span>
+            <span class="mode-step-tag">Загрузка</span>
+            <span class="mode-step-tag">Готовые кадры</span>
+            <span class="mode-step-tag">Пересказ</span>
+            <span class="mode-step-tag">Нумерация</span>
+            <span class="mode-step-tag">Немое видео</span>
+            <span class="mode-step-tag">3 превью</span>
           </div>
-          <div class="mode-card-cta">Start building</div>
+          <div class="mode-card-cta">Начать</div>
         </div>
       </div>
     </section>
 
     <!-- Panel 3 · Recent projects -->
     <section class="panel panel-projects">
-      <h2 class="panel-heading">Recent projects</h2>
+      <h2 class="panel-heading">Недавние проекты</h2>
       <div class="projects-grid" id="projectsGrid">
         <div class="empty-state" style="grid-column:1/-1">
           <div class="empty-state-icon">
@@ -159,7 +123,7 @@
               <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="#1B1C1F" stroke-width="1.6" stroke-linejoin="round"/>
             </svg>
           </div>
-          <div class="empty-state-text">Nothing on the desk yet. Pick a style above and start your first strip.</div>
+          <div class="empty-state-text">Здесь появятся созданные вами проекты.</div>
         </div>
       </div>
     </section>
@@ -168,7 +132,7 @@
 
   <!-- ═══════════ VIEW: Wizard ═══════════ -->
   <div id="viewWizard" class="hidden">
-    <button class="back-link" type="button" onclick="goHome()">Back to home</button>
+    <button class="back-link" type="button" onclick="goHome()">На главную</button>
 
     <!-- Step Indicator -->
     <div class="step-indicator" id="stepIndicator"></div>

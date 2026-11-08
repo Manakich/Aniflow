@@ -265,31 +265,24 @@ def _extract_text_and_description(image_path: str, vision_model: str,
         image_b64 = base64.b64encode(f.read()).decode('utf-8')
 
     prompt = (
-        "TASK: Extract ONLY English dialogue and narration from this manhwa panel.\n\n"
-        "CRITICAL RULES:\n"
-        "✓ ONLY extract text that is in ENGLISH LANGUAGE\n"
-        "✗ NEVER extract Korean characters (한글/hangul)\n"
-        "✗ NEVER extract Chinese characters (汉字/hanzi)\n"
-        "✗ NEVER extract Japanese characters (漢字/kanji, ひらがな/hiragana, カタカナ/katakana)\n"
-        "✗ NEVER extract any non-Latin script characters\n\n"
-        "INCLUDE:\n"
-        "- Text inside speech bubbles (white/colored rounded shapes characters speak through)\n"
-        "- Text inside thought bubbles\n"
-        "- Text inside narration boxes (rectangular boxes with story narration)\n"
-        "- ONLY if the text uses English alphabet (A-Z, a-z)\n\n"
-        "EXCLUDE (do NOT extract):\n"
-        "- ANY text with Korean/Chinese/Japanese/non-Latin characters\n"
-        "- Signs, posters, and labels in the scene (e.g. shop names, door signs)\n"
-        "- Sound effects and onomatopoeia (e.g. CRASH, BANG, sfx text)\n"
-        "- Curse/swear symbols (e.g. #@$!!, %&?!, ****)\n"
-        "- Title cards, chapter headers, timestamps\n"
-        "- Background text, watermarks, credits\n\n"
-        "FORMAT:\n"
-        "- One line per bubble/box, exactly as written\n"
-        "- Do NOT add speaker labels or prefixes\n"
-        "- If there is no ENGLISH text to extract, output: NONE\n"
-        "- Do NOT invent or hallucinate text\n\n"
-        "Extract ENGLISH text only now:"
+        "Ты анализируешь одну уже вырезанную панель манги/манхвы. "
+        "Верни ДВА раздела строго в указанном формате.\n\n"
+        "TEXT:\n"
+        "- Извлеки читаемые реплики из облачков и текст повествования.\n"
+        "- Сохраняй только текст латиницей (например, английский перевод).\n"
+        "- Не выдумывай буквы и слова; если текста нет, напиши NONE.\n"
+        "- Не включай звуковые эффекты, логотипы, подписи, водяные знаки и кредиты.\n\n"
+        "VISUAL:\n"
+        "- По-русски опиши в 1–2 предложениях, что реально происходит в сцене.\n"
+        "- Укажи видимые действия персонажей, их эмоции, важные предметы и место действия.\n"
+        "- Если в кадре несколько персонажей, опиши их расположение и взаимодействие.\n"
+        "- Не называй персонажей по имени, если имя не видно в панели.\n"
+        "- Не пересказывай невидимые события и не придумывай мотивы.\n"
+        "- Если содержание непонятно, честно напиши: Сюжетная деталь неразборчива.\n\n"
+        "FORMAT (обязательно):\n"
+        "TEXT:\n<реплики или NONE>\n"
+        "VISUAL:\n<краткое русское описание>\n\n"
+        "Не добавляй вступление, объяснения или третий раздел."
     )
 
     try:
@@ -337,56 +330,55 @@ def _manga_ocr(image_path: str) -> str:
 
 
 def _parse_vision_response(raw: str) -> tuple[str, str]:
-    """Parse the response from the vision model."""
-    text_part = raw
+    """Parse structured TEXT and Russian VISUAL sections from one vision request."""
+    raw = (raw or "").strip()
+    if not raw:
+        return "", ""
+
     visual_part = ""
+    text_part = raw
+    match = re.search(
+        r"(?:^|\n)\s*(?:VISUAL|DESCRIPTION|ОПИСАНИЕ)\s*:\s*(.*)$",
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        visual_part = match.group(1).strip()
+        text_part = raw[:match.start()].strip()
+    text_part = re.sub(r"^\s*TEXT\s*:\s*", "", text_part, flags=re.IGNORECASE)
+    visual_part = re.sub(r"^\s*(?:VISUAL|DESCRIPTION|ОПИСАНИЕ)\s*:\s*", "", visual_part, flags=re.IGNORECASE)
+    visual_part = re.sub(r"\s+", " ", visual_part).strip()
+    if visual_part.upper() in {"NONE", "N/A", "НЕРАЗБОРЧИВО", "НЕТ"}:
+        visual_part = ""
 
     text_lines = []
-    for line in text_part.split('\n'):
+    for line in text_part.split("\n"):
         line = line.strip()
+        if not line or line.upper() in ("NONE", "N/A", "NO TEXT", "NO TEXT DETECTED"):
+            continue
+        line = re.sub(
+            r"^(?:TEXT|SPEAKER|NARRATOR|UNKNOWN|CHARACTER)\s*[:：]\s*",
+            "",
+            line,
+            flags=re.IGNORECASE,
+        ).strip()
         if not line:
             continue
-        if line.upper() in ('NONE', 'N/A', 'NO TEXT', 'NO TEXT DETECTED'):
-            continue
-        skip = ['here is', 'the text', 'i can see', 'visible text',
-                'this panel', 'in this image', 'the panel shows']
-        if any(line.lower().startswith(s) for s in skip):
-            continue
-        # Strip speaker prefixes (e.g. "Speaker: TEXT" → "TEXT")
-        # The vision model labels everything as "Speaker:" which would be read aloud by TTS
-        line = re.sub(r'^(?:Speaker|Narrator|Unknown|Character)\s*[:：]\s*', '', line, flags=re.IGNORECASE)
-        if not line:
-            continue
-        
-        # FILTER OUT NON-ENGLISH CHARACTERS
-        # Remove any Korean (Hangul) characters: U+AC00 to U+D7AF
-        # Remove any Chinese/Japanese (CJK Unified Ideographs): U+4E00 to U+9FFF
-        # Remove Japanese Hiragana: U+3040 to U+309F
-        # Remove Japanese Katakana: U+30A0 to U+30FF
-        line = re.sub(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]+', '', line)
+
+        # Current source material is usually available in English translation.
+        # Non-Latin text is skipped rather than mangled or hallucinated.
+        line = re.sub(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]+", "", line)
         line = line.strip()
-        
-        # Skip if line is now empty after filtering
-        if not line:
+        alpha_chars = sum(1 for char in line if char.isalpha())
+        latin_chars = sum(1 for char in line if char.isalpha() and ord(char) < 0x0370)
+        if alpha_chars < 2 or (alpha_chars and latin_chars / alpha_chars < 0.5):
             continue
-            
-        # Skip lines that are mostly symbols/punctuation (curse symbols, sfx)
-        # e.g. "#@$!!", "%&?!", "***", "!!!", "..."
-        alpha_chars = sum(1 for c in line if c.isalpha())
-        if alpha_chars < 2:
-            continue
-            
-        # Additional check: ensure at least 50% of alphabetic characters are Latin (English)
-        latin_chars = sum(1 for c in line if c.isalpha() and ord(c) < 0x0370)  # Latin range
-        if alpha_chars > 0 and latin_chars / alpha_chars < 0.5:
-            continue
-            
         text_lines.append(line)
 
-    return '\n'.join(text_lines), visual_part.strip()
+    return "\n".join(text_lines), visual_part
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════
 # Model resolution
 # ═══════════════════════════════════════════════════════════════════
 

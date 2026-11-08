@@ -9,9 +9,6 @@ Pillow>=10.0
 numpy>=1.24
 moviepy>=2.0
 
-# ─── TTS ──────────────────────────────────────────────
-edge-tts>=6.1          # default narrator voice (free)
-
 # ─── Web scraping / chapter downloads ─────────────────
 requests>=2.31
 beautifulsoup4>=4.12
@@ -30,3 +27,7 @@ transformers>=4.45
 einops
 timm
 easyocr>=1.7           # finds speech-bubble text for inpainting
+
+
+# ─── Local .env loading ─────────────────────────────────────────
+python-dotenv>=1.0

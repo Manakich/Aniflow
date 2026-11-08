@@ -79,7 +79,6 @@ if not exist "manhwa_stitch" mkdir "manhwa_stitch"
 if not exist "manhwa_detect" mkdir "manhwa_detect"
 if not exist "manhwa_crop" mkdir "manhwa_crop"
 if not exist "manhwa_text" mkdir "manhwa_text"
-if not exist "manhwa_audio" mkdir "manhwa_audio"
 if not exist "manhwa_clips" mkdir "manhwa_clips"
 
 echo.
@@ -87,14 +86,13 @@ echo ╔════════════════════════
 echo ║           ✅ Setup Complete!                  ║
 echo ╚═══════════════════════════════════════════════╝
 echo.
-echo   Start AniFlow:
-echo     venv\Scripts\activate
-echo     python app.py
+echo   Start AniFlow from PowerShell:
+echo     .\venv\Scripts\python.exe app.py
 echo.
 echo   Then open http://localhost:8080 in your browser.
 echo.
 echo   Optional:
-echo     * Edit .env to add Gemini/Claude/ElevenLabs API keys
+echo     * Edit .env to add a cloud LLM API key, or use local Ollama
 echo     * Install Ollama from https://ollama.com
 echo     * Run: ollama pull qwen2.5vl:3b
 echo     * Run: ollama pull qwen2.5:14b

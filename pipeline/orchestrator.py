@@ -2,13 +2,11 @@
 Pipeline Orchestrator - Coordinates the full recap generation pipeline.
 Enhanced with multi-resolution, cast system, script rewriting, CapCut export.
 
-Pipeline stages:
-  init → loaded → stitched → detected1 → cropped1 → stitched2 →
-  detected2 → cropped2 → text_extracted → text_removed → narrated →
-  audio_done → video_done
+Pipeline stages for the single-purpose Recap Studio workflow:
+  source download → native Crop 2 panel extraction → OCR/context →
+  one long Russian recap script → numbered panels + silent MP4 → YouTube package.
 
-Smart Resume: every step checks whether its outputs already exist on disk.
-If they do (and boxes haven't changed), the step is skipped instantly.
+Smart Resume: the existing AniFlow download, crop and OCR outputs are reused.
 """
 import hashlib, os, json, time, shutil
 from datetime import datetime
@@ -20,8 +18,6 @@ from pipeline.panel_extractor_yolo import YoloPanelExtractor
 from pipeline.text_extractor import extract_text_all_panels
 from pipeline.text_remover import remove_text_boxes
 from pipeline.narrator import Narrator
-from pipeline.tts_engine import generate_all_audio
-from pipeline.compositor import compose_video, get_video_info
 from pipeline.script_rewriter import ScriptRewriter
 from pipeline.capcut_director import CapCutDirector
 from pipeline.cast_system import Cast, export_project_cast, list_casts
@@ -77,8 +73,7 @@ class PipelineState:
     """
     
     STAGES = ['init', 'loaded', 'stitched', 'detected1', 'cropped1', 'stitched2',
-              'detected2', 'cropped2', 'text_extracted',
-              'text_removed', 'narrated', 'audio_done', 'video_done', 'clips_done']
+              'detected2', 'cropped2', 'text_extracted', 'text_removed']
 
     def __init__(self, project_name):
         # ✅ NAME RESOLUTION: map free-typed names onto the real download
@@ -132,7 +127,6 @@ class PipelineState:
         self.detect_dir = self.paths['detect']
         self.crop_dir = self.paths['crop']
         self.text_dir = self.paths['text']
-        self.audio_dir = self.paths['audio']
         self.clips_dir = self.paths['clips']
         self.state_file = self.paths['state']
         
@@ -158,6 +152,22 @@ class PipelineState:
         self.error = None
         self.video_path = None
         self.video_clips = []  # List of generated clip metadata
+        # Separate, backward-compatible state for the continuous full-recap mode.
+        self.full_recap_panel_context = []
+        self.full_recap_panels = []
+        self.full_recap_workspace_dir = None
+        self.full_recap_script = ""
+        self.full_recap_word_count = 0
+        self.full_recap_duration_seconds = 0.0
+        self.full_recap_export_dir = None
+        self.full_recap_video_path = None
+        self.full_recap_description = ""
+        self.full_recap_pinned_comment = ""
+        self.full_recap_status = "not_started"
+        self.full_recap_titles = []
+        self.full_recap_selected_title = None
+        self.full_recap_thumbnails = []
+        self.full_recap_package_status = "not_started"
         self.boxes1_cropped_hash = ""
         self.boxes2_cropped_hash = ""
         
@@ -165,23 +175,11 @@ class PipelineState:
         self.batch_progress = {}  # {chapter_num: {'stage': 'done', 'error': None}}
         
         self.settings = {
-            'tts_voice': config.TTS_VOICE,
-            'tts_rate': config.TTS_RATE,
-            'tts_pitch': config.TTS_PITCH,
-            'tts_engine': config.TTS_ENGINE,
-            'tts_speed': config.KOKORO_SPEED,
             'ollama_model': config.OLLAMA_MODEL,
             'video_quality': config.VIDEO_QUALITY,
             'video_resolution': config.VIDEO_RESOLUTION,
             'video_fps': config.VIDEO_FPS,
             'bg_mode': config.BACKGROUND_MODE,
-            'bgm_path': '',
-            'bgm_volume': config.BGM_VOLUME,
-            'watermark_path': '',
-            'custom_bg_path': '',
-            'intro_path': '',
-            'outro_path': '',
-            'export_clips': False,
             'animation_style': 'auto',
             'cast_file': '',
             'panel_method': getattr(config, 'DEFAULT_PANEL_EXTRACTION_METHOD', 'yolo'),
@@ -194,7 +192,6 @@ class PipelineState:
         os.makedirs(self.detect_dir, exist_ok=True)
         os.makedirs(self.crop_dir, exist_ok=True)
         os.makedirs(self.text_dir, exist_ok=True)
-        os.makedirs(self.audio_dir, exist_ok=True)
         os.makedirs(self.clips_dir, exist_ok=True)
     
     def set_source(self, source_folder: str):
@@ -287,7 +284,6 @@ class PipelineState:
         self.detect_dir = self.paths['detect']
         self.crop_dir = self.paths['crop']
         self.text_dir = self.paths['text']
-        self.audio_dir = self.paths['audio']
         self.clips_dir = self.paths['clips']
         self.state_file = self.paths['state']
         
@@ -302,7 +298,6 @@ class PipelineState:
         os.makedirs(self.detect_dir, exist_ok=True)
         os.makedirs(self.crop_dir, exist_ok=True)
         os.makedirs(self.text_dir, exist_ok=True)
-        os.makedirs(self.audio_dir, exist_ok=True)
         os.makedirs(self.clips_dir, exist_ok=True)
     
     def switch_to_chapter(self, chapter_num: int):
@@ -333,7 +328,6 @@ class PipelineState:
         self.detect_dir = self.paths['detect']
         self.crop_dir = self.paths['crop']
         self.text_dir = self.paths['text']
-        self.audio_dir = self.paths['audio']
         self.clips_dir = self.paths['clips']
         self.state_file = self.paths['state']
         
@@ -498,6 +492,21 @@ class PipelineState:
         self.error = data.get('error')
         self.video_path = data.get('video_path')
         self.video_clips = data.get('video_clips', [])
+        self.full_recap_panel_context = data.get('full_recap_panel_context', [])
+        self.full_recap_panels = data.get('full_recap_panels', [])
+        self.full_recap_workspace_dir = data.get('full_recap_workspace_dir')
+        self.full_recap_script = data.get('full_recap_script', "")
+        self.full_recap_word_count = data.get('full_recap_word_count', 0)
+        self.full_recap_duration_seconds = data.get('full_recap_duration_seconds', 0.0)
+        self.full_recap_export_dir = data.get('full_recap_export_dir')
+        self.full_recap_video_path = data.get('full_recap_video_path')
+        self.full_recap_description = data.get('full_recap_description', "")
+        self.full_recap_pinned_comment = data.get('full_recap_pinned_comment', "")
+        self.full_recap_status = data.get('full_recap_status', "not_started")
+        self.full_recap_titles = data.get('full_recap_titles', [])
+        self.full_recap_selected_title = data.get('full_recap_selected_title')
+        self.full_recap_thumbnails = data.get('full_recap_thumbnails', [])
+        self.full_recap_package_status = data.get('full_recap_package_status', "not_started")
         self.boxes1_cropped_hash = data.get('boxes1_cropped_hash', '')
         self.boxes2_cropped_hash = data.get('boxes2_cropped_hash', '')
 
@@ -567,6 +576,21 @@ class PipelineState:
             'error': self.error,
             'video_path': self.video_path,
             'video_clips': self.video_clips,
+            'full_recap_panel_context': self.full_recap_panel_context,
+            'full_recap_panels': self.full_recap_panels,
+            'full_recap_workspace_dir': self.full_recap_workspace_dir,
+            'full_recap_script': self.full_recap_script,
+            'full_recap_word_count': self.full_recap_word_count,
+            'full_recap_duration_seconds': self.full_recap_duration_seconds,
+            'full_recap_export_dir': self.full_recap_export_dir,
+            'full_recap_video_path': self.full_recap_video_path,
+            'full_recap_description': self.full_recap_description,
+            'full_recap_pinned_comment': self.full_recap_pinned_comment,
+            'full_recap_status': self.full_recap_status,
+            'full_recap_titles': self.full_recap_titles,
+            'full_recap_selected_title': self.full_recap_selected_title,
+            'full_recap_thumbnails': self.full_recap_thumbnails,
+            'full_recap_package_status': self.full_recap_package_status,
             'settings': self.settings,
             'boxes1_cropped_hash': self.boxes1_cropped_hash,
             'boxes2_cropped_hash': self.boxes2_cropped_hash,
@@ -592,7 +616,23 @@ class PipelineState:
                 'manhwa_name': self.manhwa_name,
                 'chapter_list': self.chapter_list,
                 'is_batch': self.is_batch,
-                'updated_at': self.updated_at
+                'updated_at': self.updated_at,
+                # Full Recap is a project-level episode that can span chapters.
+                'full_recap_panel_context': self.full_recap_panel_context,
+                'full_recap_panels': self.full_recap_panels,
+                'full_recap_workspace_dir': self.full_recap_workspace_dir,
+                'full_recap_script': self.full_recap_script,
+                'full_recap_word_count': self.full_recap_word_count,
+                'full_recap_duration_seconds': self.full_recap_duration_seconds,
+                'full_recap_export_dir': self.full_recap_export_dir,
+                'full_recap_video_path': self.full_recap_video_path,
+                'full_recap_description': self.full_recap_description,
+                'full_recap_pinned_comment': self.full_recap_pinned_comment,
+                'full_recap_status': self.full_recap_status,
+                'full_recap_titles': self.full_recap_titles,
+                'full_recap_selected_title': self.full_recap_selected_title,
+                'full_recap_thumbnails': self.full_recap_thumbnails,
+                'full_recap_package_status': self.full_recap_package_status
             }
             os.makedirs(os.path.dirname(master_state_file), exist_ok=True)
             with open(master_state_file, 'w', encoding='utf-8') as f:
@@ -748,6 +788,33 @@ class PipelineState:
                 except Exception as e:
                     print(f"[PipelineState.load] Master state re-check failed: {e}")
 
+        # Restore project-level Full Recap artefacts from the batch master state.
+        # They belong to the whole episode, not to whichever chapter the user last viewed.
+        if state.is_batch and len(state.chapter_list) > 1:
+            master_state_file = os.path.join(
+                config.MANHWA_DOWNLOAD_DIR, state.manhwa_name, '.batch_state.json'
+            )
+            try:
+                with open(master_state_file, 'r', encoding='utf-8') as f:
+                    master_data = json.load(f)
+                shared_fields = (
+                    'full_recap_panel_context', 'full_recap_panels',
+                    'full_recap_workspace_dir', 'full_recap_script',
+                    'full_recap_word_count', 'full_recap_duration_seconds',
+                    'full_recap_export_dir', 'full_recap_video_path',
+                    'full_recap_description', 'full_recap_pinned_comment',
+                    'full_recap_status', 'full_recap_titles',
+                    'full_recap_selected_title', 'full_recap_thumbnails',
+                    'full_recap_package_status',
+                )
+                for field in shared_fields:
+                    if field in master_data:
+                        setattr(state, field, master_data[field])
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                print(f"[PipelineState.load] Could not restore Full Recap master data: {e}")
+
         # Auto-repair: if saved stage is stale/lower than what's on disk, fix it.
         # NOTE: only UPGRADE here. The narrated two-stage flow legitimately
         # passes through detected2 AFTER cropped1 (Crop 1 → Stitch 2 → Detect 2),
@@ -791,27 +858,16 @@ class PipelineState:
         Scan output directories to determine the highest completed pipeline stage.
         Uses new organized folder structure.
         """
-        # ── clips_done: video clips exist in manhwa_clips/ ──────────────────
+        # ── Legacy clip folders: ignored by the silent Full Recap workflow ─
         if os.path.isdir(self.clips_dir):
             clips = [f for f in os.listdir(self.clips_dir) 
                     if f.endswith('.mp4') and os.path.getsize(os.path.join(self.clips_dir, f)) > 10000]
             if clips:
                 return 'clips_done'
         
-        # ── video_done: legacy video path or clips folder ───────────────────
+        # ── Legacy video files: ignored by the silent Full Recap workflow ───
         if self.video_path and os.path.exists(self.video_path):
             return 'video_done'
-
-        # ── audio_done: audio files exist in manhwa_audio/ ──────────────────
-        if os.path.isdir(self.audio_dir):
-            audio_files = [f for f in os.listdir(self.audio_dir) 
-                          if f.endswith('.mp3') and os.path.getsize(os.path.join(self.audio_dir, f)) > 1000]
-            if audio_files:
-                return 'audio_done'
-
-        # ── narrated: panels have narration text ────────────────────────────
-        if any(p.get('narration') or p.get('scene_narration') for p in self.panels):
-            return 'narrated'
 
         # ── text_extracted: text files exist in manhwa_text/ ────────────────
         if os.path.isdir(self.text_dir):
@@ -943,8 +999,7 @@ class Orchestrator:
     _STAGE_RANK = {
         s: i for i, s in enumerate([
             'init','loaded','stitched','detected1','cropped1',
-            'stitched2','detected2','cropped2','text_extracted',
-            'text_removed','narrated','audio_done','video_done','clips_done'
+            'stitched2','detected2','cropped2','text_extracted'
         ])
     }
 
@@ -1075,7 +1130,7 @@ class Orchestrator:
                 state.error = f"Raw directory not found: {load_dir}"
                 state.save()
                 return state
-            
+
             # Check for batch mode: multiple Chapter_XXXXX folders?
             # ✅ BATCH FIX: only count folders that actually contain images —
             # empty folders (e.g. a stray Chapter_00000) must not become chapters.
@@ -1177,7 +1232,7 @@ class Orchestrator:
         # Check if we have images - either stage is 'loaded' OR raw_pages is not empty
         has_images = (state.stage in ['loaded', 'stitched', 'detected1', 'cropped1', 'stitched2',
                                        'detected2', 'cropped2', 'text_extracted', 'text_removed',
-                                       'narrated', 'audio_done', 'video_done']) or len(state.raw_pages) > 0
+                                       'text_removed']) or len(state.raw_pages) > 0
         
         if not has_images:
             state.error = "Must load images first."
@@ -1447,7 +1502,7 @@ class Orchestrator:
         """Detect 1: Run panel_with_bubble_text model on Stitched Image 1."""
         if state.stage not in ('clips_done', 'stitched', 'detected1', 'cropped1', 'stitched2',
                                'detected2', 'cropped2', 'text_extracted',
-                               'text_removed', 'narrated', 'audio_done', 'video_done'):
+                               'text_removed', 'narrated', 'text_removed'):
             state.error = "Must stitch images first."
             return state
         
@@ -1510,7 +1565,7 @@ class Orchestrator:
         """Crop 1: Crop Detect 1 results into Manhwa_panel_with_bubble/title/chapter/0001.jpg."""
         if state.stage not in ('clips_done', 'detected1', 'cropped1', 'stitched2', 'detected2',
                                'cropped2', 'text_extracted', 'text_removed',
-                               'narrated', 'audio_done', 'video_done'):
+                               ):
             state.error = "Must run Detect 1 first."
             return state
         
@@ -1785,7 +1840,7 @@ class Orchestrator:
         ['clean_art_panels'] = False to keep the raw crops."""
         if not state.is_batch:
             if state.stage not in ('clips_done', 'detected2', 'cropped2', 'text_extracted', 'text_removed',
-                                   'narrated', 'audio_done', 'video_done'):
+                                   'text_removed'):
                 state.error = "Must run Detect 2 first."
                 return state
         return self._run_batch_or_single(state, 'crop2', self._crop_art_panels_single)
@@ -2107,318 +2162,6 @@ class Orchestrator:
             state.save()
         return state
 
-    def step_narrate_mapped(self, state):
-        """Generate narration using Stitch 1 panels + Stitch 2 panels + extracted text.
-
-        Sends to LLM:
-          - Panel-with-text image (from Crop 1 / Stitch 1)
-          - Art panel image (from Crop 2 / Stitch 2)
-          - Extracted dialogue text
-
-        Saves narration to: output/narration/Title/Chapter/
-        Each narration entry is mapped to a Stitch 2 (art) panel.
-        """
-        if state.stage not in ('clips_done', 'text_extracted', 'cropped2', 'narrated',
-                               'audio_done', 'video_done'):
-            state.error = "Must extract text first."
-            return state
-        
-        # Capture the per-request force flag BEFORE the batch loop —
-        # switch_to_chapter() reloads per-chapter settings which would wipe it
-        self._force_renarrate = bool(state.settings.pop('force_renarrate', False))
-        try:
-            return self._run_batch_or_single(state, 'narrate', self._narrate_mapped_single)
-        finally:
-            self._force_renarrate = False
-    
-    def _narrate_mapped_single(self, state):
-        """Generate narration for a single chapter"""
-
-        if not state.panels:
-            state.error = "No art panels (Crop 2) available."
-            state.save()
-            return state
-
-        narration_dir = os.path.join(config.NARRATION_DIR, state.manhwa_name, f"Chapter_{state.current_chapter:05d}")
-        narration_json_path = os.path.join(narration_dir, "narration.json")
-
-        # ── SMART RESUME: load narration.json — complete OR PARTIAL ──
-        # A partial cache (e.g. Gemini quota ran out mid-chapter) is restored
-        # so a re-run only narrates the MISSING panels instead of restarting.
-        restored_partial = False
-        # Explicit "Generate Narration" click → regenerate everything, no cache
-        force_renarrate = getattr(self, '_force_renarrate', False)
-        if force_renarrate:
-            print("[NarrateMapped] Force re-narration requested — regenerating all panels")
-            for panel in state.panels:
-                panel['narration'] = ''
-                panel['scene_narration'] = ''
-        elif self._stage_gte(state, 'narrated') and os.path.exists(narration_json_path):
-            try:
-                with open(narration_json_path, 'r', encoding='utf-8') as f:
-                    cached = json.load(f)
-                if cached:
-                    narr_by_id = {e['panel_id']: (e.get('narration') or '') for e in cached}
-                    dlg_by_id = {e['panel_id']: e.get('dialogue', '') for e in cached}
-                    for panel in state.panels:
-                        pid = panel['panel_id']
-                        if pid in narr_by_id and narr_by_id[pid] and not narr_by_id[pid].startswith('['):
-                            if not panel.get('narration'):
-                                panel['narration'] = narr_by_id[pid]
-                                panel['scene_narration'] = narr_by_id[pid]
-                            if not panel.get('text'):
-                                panel['text'] = dlg_by_id.get(pid, '')
-                    missing = [p for p in state.panels if not (p.get('narration') or '').strip()
-                               or (p.get('narration') or '').startswith('[')]
-                    # Same backend + same prompt version + complete cache → skip.
-                    # Backend switched (local ↔ gemini) OR the narration prompt
-                    # was upgraded → re-narrate everything.
-                    from pipeline.narrator import NARRATION_PROMPT_VERSION
-                    same_style = (
-                        (state.settings.get('narration_backend') or 'ollama') ==
-                        (state.settings.get('last_narration_backend') or 'ollama') and
-                        int(state.settings.get('narration_prompt_version') or 1) == NARRATION_PROMPT_VERSION
-                    )
-                    if not missing:
-                        if same_style:
-                            self._emit_progress('narrate_mapped', 1, 1,
-                                f"✅ Narrate: loaded {len(cached)} cached narrations (skipping re-narration)")
-                            return state
-                        print("[NarrateMapped] Narration backend/prompt changed — re-narrating all panels")
-                        for panel in state.panels:
-                            panel['narration'] = ''
-                            panel['scene_narration'] = ''
-                    elif len(missing) < len(state.panels):
-                        restored_partial = True
-                        print(f"[NarrateMapped] Partial cache: {len(state.panels) - len(missing)} "
-                              f"cached, re-narrating {len(missing)} missing panel(s)")
-            except Exception as e:
-                print(f"[NarrateMapped] Cache load failed: {e} — will re-narrate")
-        
-        # Load extracted dialogue text
-        narration_dir = os.path.join(config.NARRATION_DIR, state.manhwa_name, f"Chapter_{state.current_chapter:05d}")
-        os.makedirs(narration_dir, exist_ok=True)
-
-        txt_dir = os.path.join(config.EXTRACTED_TXT_DIR, state.manhwa_name)
-        txt_path = os.path.join(txt_dir, f"Chapter_{state.current_chapter:05d}.txt")
-        dialogue_text = ""
-        if os.path.exists(txt_path):
-            with open(txt_path, 'r', encoding='utf-8') as f:
-                dialogue_text = f.read()
-            print(f"[NarrateMapped] Loaded dialogue from {txt_path} ({len(dialogue_text)} chars)")
-        else:
-            print(f"[NarrateMapped] No dialogue file found at {txt_path}, proceeding without text")
-        
-        # Build text lookup by parent panel ID
-        text_by_parent = {}
-        for pwt in state.panels_with_text:
-            text_by_parent[pwt['panel_id']] = pwt.get('text', '')
-        
-        # Parse chapter text into per-panel dialogue by [PANEL N] markers
-        # This is the FALLBACK when parent_panel_id mapping is unavailable
-        text_by_panel_index = {}
-        if dialogue_text:
-            import re
-            panel_blocks = re.split(r'\[PANEL\s+(\d+)\]', dialogue_text)
-            # panel_blocks = ['', '1', '\ncontent1\n', '2', '\ncontent2\n', ...]
-            for j in range(1, len(panel_blocks) - 1, 2):
-                try:
-                    panel_num = int(panel_blocks[j])
-                    content = panel_blocks[j + 1].strip()
-                    if content and content != '(no dialogue)':
-                        text_by_panel_index[panel_num] = content
-                except (ValueError, IndexError):
-                    pass
-            if text_by_panel_index:
-                print(f"[NarrateMapped] Parsed {len(text_by_panel_index)} panel dialogue blocks from chapter text")
-        
-        self._emit_progress('narrate_mapped', 0, len(state.panels), "Starting mapped narration...")
-
-        try:
-            # ── Narration backend choice ─────────────────────────────
-            # 'ollama' (default) → local decoupled vision+writer models
-            # 'gemini'           → cloud Gemini with MULTI-KEY quota rotation
-            # The local path is untouched — Gemini is an additive option for
-            # users whose PC can't run the local models comfortably.
-            narration_backend = (state.settings.get('narration_backend') or 'ollama').lower()
-            gemini_narr = None
-            if narration_backend == 'gemini':
-                from pipeline.gemini_narrator import GeminiNarrator, GeminiExhaustedError
-                keys = state.settings.get('gemini_api_keys') or []
-                gemini_model = state.settings.get('gemini_model', 'gemini-2.5-flash')
-                gemini_narr = GeminiNarrator(
-                    keys, model=gemini_model,
-                    status_callback=lambda m: self._emit_progress(
-                        'narrate_mapped', 0, len(state.panels), m))
-                if not gemini_narr.keys:
-                    state.error = ("Gemini narration selected but no API keys provided. "
-                                   "Add one or more keys in the Narrate step.")
-                    state.save()
-                    return state
-                print(f"[NarrateMapped] Backend: GEMINI ({gemini_model}) with "
-                      f"{len(gemini_narr.keys)} key(s)")
-            else:
-                self.narrator.model = state.settings.get('ollama_model', config.OLLAMA_MODEL)
-                self.narrator._resolve_model_name()
-                print("[NarrateMapped] Backend: LOCAL OLLAMA")
-
-            # Load character names from cast if a cast file is set
-            cast_characters = self._load_cast_characters(state)
-            cast_reference_images = self._load_cast_reference_images(state)
-            if cast_reference_images:
-                print(f"[NarrateMapped] Cast: {len(cast_characters)} characters, {len(cast_reference_images)} reference faces loaded")
-            
-            narration_entries = []
-            
-            for i, panel in enumerate(state.panels):
-                if self._should_cancel: return state
-
-                self._emit_progress('narrate_mapped', i + 1, len(state.panels),
-                    f"Narrating panel {i + 1}/{len(state.panels)}...")
-
-                # Partial-resume: keep narrations restored from cache, only
-                # generate the missing/failed ones
-                existing_narr = (panel.get('narration') or '').strip()
-                if existing_narr and not existing_narr.startswith('['):
-                    narration_entries.append({
-                        'panel_id': panel['panel_id'],
-                        'art_panel_path': panel['path'],
-                        'parent_panel_path': (state.panels_mapping.get(str(panel['panel_id']), {}) or {}).get('parent_path'),
-                        'dialogue': panel.get('text', ''),
-                        'narration': existing_narr,
-                        'backend': narration_backend,
-                    })
-                    continue
-
-                # Get the parent panel-with-text for dialogue context
-                parent_id = panel.get('parent_panel_id')
-                parent_path = None
-                panel_dialogue = ""
-                
-                if parent_id:
-                    mapping = state.panels_mapping.get(str(panel['panel_id']), {})
-                    parent_path = mapping.get('parent_path')
-                    panel_dialogue = text_by_parent.get(parent_id, '')
-                
-                # FALLBACK: If no parent mapping, use the parsed chapter text by panel index
-                if not panel_dialogue:
-                    panel_dialogue = text_by_panel_index.get(panel['panel_id'], '')
-                
-                # Build the narration prompt with both images and text context
-                art_panel_path = panel['path']
-                # Build sliding window text context (Prev, Curr, Next)
-                prev_txt = ""
-                curr_txt = panel_dialogue
-                next_txt = ""
-                
-                if i > 0:
-                    prev_parent_id = state.panels[i-1].get('parent_panel_id')
-                    if prev_parent_id:
-                        prev_txt = text_by_parent.get(prev_parent_id, '')
-                    if not prev_txt:
-                        prev_txt = text_by_panel_index.get(state.panels[i-1]['panel_id'], '')
-                if i < len(state.panels) - 1:
-                    next_parent_id = state.panels[i+1].get('parent_panel_id')
-                    if next_parent_id:
-                        next_txt = text_by_parent.get(next_parent_id, '')
-                    if not next_txt:
-                        next_txt = text_by_panel_index.get(state.panels[i+1]['panel_id'], '')
-                        
-                sliding_window = f"--- PREVIOUS PANEL DIALOGUE ---\n{prev_txt}\n\n--- CURRENT PANEL DIALOGUE ---\n{curr_txt}\n\n--- NEXT PANEL DIALOGUE ---\n{next_txt}"
-                
-                try:
-                    if gemini_narr is not None:
-                        story_so_far = " ".join(
-                            e['narration'] for e in narration_entries[-6:]
-                            if not e['narration'].startswith('['))
-                        narration = gemini_narr.narrate_panel(
-                            art_panel_path=art_panel_path,
-                            bubble_panel_path=parent_path,
-                            dialogue_window=sliding_window,
-                            cast_characters=cast_characters,
-                            story_so_far=story_so_far,
-                            panel_id=panel['panel_id'],
-                            cast_reference_images=cast_reference_images,
-                        )
-                    else:
-                        mock_panel = {
-                            'path': art_panel_path,
-                            'padded_path': parent_path or art_panel_path,
-                            'panel_id': panel['panel_id'],
-                            'text': panel_dialogue
-                        }
-                        narration = self.narrator.narrate_panel_with_context(
-                            panel=mock_panel,
-                            cast_characters=cast_characters,
-                            chapter_text=sliding_window,
-                            cast_reference_images=cast_reference_images,
-                        )
-                except Exception as e:
-                    # All Gemini keys exhausted → stop with a clear message so
-                    # the user can add more keys; nothing is lost (progress is
-                    # saved after every panel).
-                    from pipeline.gemini_narrator import GeminiExhaustedError
-                    if isinstance(e, GeminiExhaustedError):
-                        state.error = str(e)
-                        state.save()
-                        self._emit_progress('narrate_mapped', i, len(state.panels),
-                                            f"⛔ {e}")
-                        return state
-                    print(f"[NarrateMapped] Error on panel {panel['panel_id']}: {e}")
-                    narration = f"[Panel {panel['panel_id']}] (narration failed)"
-                
-                entry = {
-                    'panel_id': panel['panel_id'],
-                    'art_panel_path': art_panel_path,
-                    'parent_panel_path': parent_path,
-                    'dialogue': panel_dialogue,
-                    'narration': narration,
-                    'backend': narration_backend,
-                }
-                narration_entries.append(entry)
-                
-                # Also update the panel's narration field for downstream use
-                panel['narration'] = narration
-                panel['scene_narration'] = narration  # UI prefers scene_narration
-                panel['text'] = panel_dialogue
-
-                # Save continuously so the user can see live updates and not lose data if cancelled
-                narration_json_path = os.path.join(narration_dir, "narration.json")
-                with open(narration_json_path, 'w', encoding='utf-8') as f:
-                    json.dump(narration_entries, f, indent=2, ensure_ascii=False)
-                
-                narration_txt_path = os.path.join(narration_dir, "narration.txt")
-                lines = []
-                for e in narration_entries:
-                    lines.append(f"=== Panel {e['panel_id']} ===")
-                    if e['dialogue']:
-                        lines.append(f"[Dialogue] {e['dialogue']}")
-                    lines.append(f"[Narration] {e['narration']}")
-                    lines.append("")
-                with open(narration_txt_path, 'w', encoding='utf-8') as f:
-                    f.write('\n'.join(lines))
-                
-                script_path = os.path.join(state.project_dir, "narration_script.json")
-                with open(script_path, 'w', encoding='utf-8') as f:
-                    json.dump(narration_entries, f, indent=2, ensure_ascii=False)
-            
-            state.stage = 'narrated'
-            state.error = None
-            # Remember which backend produced these narrations so a re-run
-            # with the SAME backend resumes from cache, while switching
-            # backends (local ↔ gemini) re-narrates.
-            state.settings['last_narration_backend'] = narration_backend
-            from pipeline.narrator import NARRATION_PROMPT_VERSION
-            state.settings['narration_prompt_version'] = NARRATION_PROMPT_VERSION
-            state.save()
-            print(f"[NarrateMapped] Saved narration for {len(narration_entries)} panels to {narration_dir}")
-            self._emit_progress('narrate_mapped', len(state.panels), len(state.panels),
-                f"Narration complete for {len(narration_entries)} panels")
-        except Exception as e:
-            state.error = str(e)
-            state.save()
-        return state
-
     def step_extract_text(self, state):
         """Extract text from each cropped panel using the vision LLM / Magi v2."""
         if state.stage not in ('clips_done', 'cropped1', 'cropped2', 'text_extracted'):
@@ -2475,438 +2218,361 @@ class Orchestrator:
             state.save()
         return state
 
-    def step_narrate(self, state):
-        if state.stage not in ('clips_done', 'cropped1', 'cropped2', 'text_extracted', 'text_removed', 'narrated'):
-            state.error = "Must crop panels first."
-            return state
-        self.narrator.model = state.settings.get('ollama_model', config.OLLAMA_MODEL)
-        self.narrator._resolve_model_name()
-        self._emit_progress('narrate', 0, len(state.panels), "Starting AI narration...")
+    def step_full_recap_prepare(self, state):
+        """Run AniFlow's existing panel/OCR pipeline once as one internal task.
 
-        # Load character names from cast if a cast file is set
-        cast_characters = self._load_cast_characters(state)
+        Each underlying step has its own cache / smart-resume checks. When
+        Crop 2 or dialogue extraction already exists, it reuses those files
+        instead of cropping or reading the same chapter again.
+        """
+        pipeline_steps = [
+            ("Сшивка страниц", self.step_stitch),
+            ("Обнаружение областей с текстом", self.step_detect_bubble_text),
+            ("Подготовка контекстных панелей", self.step_crop_bubble_text_panels),
+            ("Сборка страниц для анализа", self.step_stitch_bubble_panels),
+            ("Обнаружение чистых кадров манги", self.step_detect_art_panels),
+            ("Извлечение готовых кадров (Crop 2)", self.step_crop_art_panels),
+            ("Извлечение текста и описаний сцен", self.step_extract_dialogue_text),
+        ]
 
-        # Three-input context (port from YTV3):
-        #   raw_dir       — full raw pages for visual context (Now uses source_page directly)
-        #   text_file     — chapter transcript for story/dialogue context
-        
-        # Extracted text is completely bypassed. The visual narrator will read directly from the image.
-        text_file = None
+        state.error = None
+        state.full_recap_status = "preparing"
+        state.save()
 
-        try:
-            if self._should_cancel: return state
-            panels = self.narrator.narrate_all_panels(
-                state.panels, state.project_dir,
-                progress_callback=lambda c, t, m: self._emit_progress('narrate', c, t, m),
-                cast_characters=cast_characters,
-                raw_dir=None,
-                text_file=text_file,
-                manifest_file=None)
-            state.panels = panels
-            state.stage = 'narrated'
-            state.error = None
-            state.save()
-        except Exception as e:
-            state.error = str(e)
-            state.save()
+        for index, (label, step_function) in enumerate(pipeline_steps, start=1):
+            if self._should_cancel:
+                state.error = "Подготовка изображений отменена."
+                state.full_recap_status = "prepare_cancelled"
+                state.save()
+                return state
+
+            self._emit_progress(
+                "full_recap_prepare", index - 1, len(pipeline_steps),
+                f"{label} ({index}/{len(pipeline_steps)})…"
+            )
+
+            try:
+                state = step_function(state)
+            except Exception as exc:
+                state.error = f"{label}: {exc}"
+                state.full_recap_status = "prepare_failed"
+                state.save()
+                return state
+
+            if state.error:
+                state.error = f"{label}: {state.error}"
+                state.full_recap_status = "prepare_failed"
+                state.save()
+                return state
+
+        if state.is_batch and len(state.chapter_list) > 1:
+            self._reset_viewing_to_first_chapter(state)
+
+        state.full_recap_status = "panels_ready"
+        state.error = None
+        state.save()
+        self._emit_progress(
+            "full_recap_prepare", len(pipeline_steps), len(pipeline_steps),
+            f"Готово: {len(state.chapter_list) if state.is_batch else 1} глава(ы), "
+            "кадры и текстовый контекст подготовлены."
+        )
         return state
 
-    def step_generate_audio(self, state):
-        if state.stage not in ('clips_done', 'narrated', 'audio_done', 'video_done', 'text_extracted', 'text_removed'):
-            state.error = "Must generate narrations or extract text first."
+    def step_full_recap_script(self, state):
+        """Write one long recap from panels already produced by AniFlow Crop 2."""
+        if not state.panels and not (state.is_batch and len(state.chapter_list) > 1):
+            state.error = "Сначала выполните штатное обнаружение и вырезание панелей (Crop 2)."
+            state.save()
             return state
-        
-        return self._run_batch_or_single(state, 'audio', self._generate_audio_single)
-    
-    def _generate_audio_single(self, state):
-        """Generate audio for a single chapter"""
 
-        # ── SMART RESUME: if audio_metadata.json exists, restore audio_path into panels ──
-        # Metadata is written to state.audio_dir by tts_engine._save_audio_metadata;
-        # keep the legacy project_dir path as a fallback for older projects.
-        audio_meta_path = os.path.join(state.audio_dir, "audio_metadata.json")
-        if not os.path.exists(audio_meta_path):
-            audio_meta_path = os.path.join(state.project_dir, "audio_metadata.json")
-        if self._stage_gte(state, 'audio_done') and os.path.exists(audio_meta_path):
-            try:
-                with open(audio_meta_path, 'r', encoding='utf-8') as f:
-                    meta = json.load(f)
-                meta = meta.get('panels', meta) if isinstance(meta, dict) else meta
-                meta_by_id = {m['panel_id']: m for m in meta}
-                all_present = all(
-                    m.get('audio_path') and os.path.exists(m['audio_path'])
-                    for m in meta if m.get('audio_path')
-                )
-                if all_present:
-                    # Restore into whichever panel list audio was generated for
-                    for panel in (state.panels + state.panels_with_text):
-                        m = meta_by_id.get(panel['panel_id'], {})
-                        if m.get('audio_path'):
-                            panel['audio_path'] = m.get('audio_path')
-                            panel['audio_duration'] = m.get('audio_duration', 2.0)
-                            panel['subtitle_path'] = m.get('subtitle_path')
-                    self._emit_progress('tts', 1, 1,
-                        f"✅ Audio: loaded {len(meta)} cached files (skipping re-generation)")
-                    return state
-            except Exception as e:
-                print(f"[TTS] Cache restore failed: {e} — will re-generate")
-
-        # ── Pick the panel list + text field for THIS pipeline mode ──
-        # narrated  → art panels (Crop 2) carry the AI narration
-        # dialogue  → bubble panels (Crop 1) carry the extracted dialogue text
-        mode = state.settings.get('pipeline_mode', '')
-        panels_have_narration = bool(state.panels) and any(
-            p.get('narration') for p in state.panels)
-
-        if mode == 'narrated' or (not mode and panels_have_narration):
-            text_field = 'narration'
-            panels_for_audio = state.panels or state.panels_with_text
-        elif mode == 'dialogue':
-            text_field = 'text'
-            panels_for_audio = state.panels_with_text or state.panels
-        else:
-            # Legacy data-driven fallback (no mode recorded)
-            panels_to_check = state.panels_with_text if state.panels_with_text else state.panels
-            text_field = 'narration'
-            if panels_to_check and not panels_to_check[0].get('narration'):
-                text_field = 'text'
-            panels_for_audio = state.panels_with_text if state.panels_with_text and text_field == 'text' else state.panels
-
-        self._emit_progress('tts', 0, len(panels_for_audio), "Starting TTS generation...")
+        first_chapter = min(state.chapter_list) if state.is_batch and state.chapter_list else state.current_chapter
         try:
-            panels = generate_all_audio(panels_for_audio, state,
-                voice=state.settings.get('tts_voice'),
-                rate=state.settings.get('tts_rate'),
-                pitch=state.settings.get('tts_pitch'),
-                engine=state.settings.get('tts_engine', 'edge'),
-                speed=state.settings.get('tts_speed', 1.0),
-                text_field=text_field,
-                progress_callback=lambda c, t, m: self._emit_progress('tts', c, t, m))
+            from pipeline.full_recap import merge_chapter_panels
+            from pipeline.recap_script_writer import (
+                RECAP_STYLE_PROFILE_RU,
+                build_panel_context,
+                count_words,
+                generate_full_recap_script,
+                target_video_duration_seconds,
+            )
 
-            # Update the correct panels array
-            if panels_for_audio is state.panels_with_text:
-                state.panels_with_text = panels
-            else:
-                state.panels = panels
-
-            state.stage = 'audio_done'
-            state.error = None
-            state.save()
-        except Exception as e:
-            state.error = str(e)
-            state.save()
-        return state
-
-    def step_compose_video(self, state):
-        if state.stage not in ('clips_done', 'audio_done', 'video_done', 'narrated'):
-            state.error = "Must generate audio first."
-            return state
-        
-        return self._run_batch_or_single(state, 'video', self._compose_video_single)
-    
-    def _compose_video_single(self, state):
-        """Compose video for a single chapter"""
-
-        # ── Pick the panel list for THIS pipeline mode ──
-        # narrated  → clean art panels (Crop 2) with narration audio
-        # dialogue  → bubble panels (Crop 1) with dialogue audio
-        mode = state.settings.get('pipeline_mode', '')
-        if mode == 'dialogue':
-            panels_to_use = state.panels_with_text or state.panels
-        elif mode == 'narrated':
-            panels_to_use = state.panels or state.panels_with_text
-        elif state.panels and any(p.get('narration') or p.get('audio_path') for p in state.panels):
-            panels_to_use = state.panels  # narrated artifacts present
-        else:
-            panels_to_use = state.panels if state.panels else state.panels_with_text
-        if not panels_to_use:
-            state.error = "No panels available for video composition."
-            state.save()
-            return state
-
-        # ── RESTORE AUDIO METADATA: Load audio_path into panels_to_use ──
-        # Metadata lives in state.audio_dir (legacy: project_dir)
-        audio_meta_path = os.path.join(state.audio_dir, "audio_metadata.json")
-        if not os.path.exists(audio_meta_path):
-            audio_meta_path = os.path.join(state.project_dir, "audio_metadata.json")
-        if os.path.exists(audio_meta_path):
+            settings = dict(state.settings)
+            backend = self.narrator.transport
+            text_model = settings.get('full_recap_text_model') or getattr(
+                config, 'TEXT_WRITER_MODEL', config.OLLAMA_MODEL
+            )
             try:
-                with open(audio_meta_path, 'r', encoding='utf-8') as f:
-                    meta = json.load(f)
-                meta = meta.get('panels', meta) if isinstance(meta, dict) else meta
-                meta_by_id = {m['panel_id']: m for m in meta}
-                for panel in panels_to_use:
-                    m = meta_by_id.get(panel['panel_id'], {})
-                    if m.get('audio_path'):
-                        panel['audio_path'] = m.get('audio_path')
-                        panel['audio_duration'] = m.get('audio_duration', 2.0)
-                        panel['subtitle_path'] = m.get('subtitle_path')
-            except Exception as e:
-                print(f"[Video] Failed to restore audio metadata: {e}")
-            
-        self._emit_progress('video', 0, len(panels_to_use), "Starting individual clip generation...")
-        try:
-            # ✅ RELIABILITY: pre-flight disk space check — failing at chapter 60
-            # of a batch is far worse than stopping now with a clear message.
-            try:
-                needed_gb = max(2.0, len(panels_to_use) * 0.03)  # ~30MB per clip incl. temp files
-                free_gb = shutil.disk_usage(state.clips_dir).free / (1024 ** 3)
-                if free_gb < needed_gb:
-                    state.error = (
-                        f"Not enough disk space before generating clips: "
-                        f"{free_gb:.1f} GB free, need ~{needed_gb:.1f} GB "
-                        f"(for {len(panels_to_use)} clips + temp files). "
-                        f"Free up space and re-run — finished chapters are cached "
-                        f"and will be skipped.")
-                    state.save()
-                    return state
+                text_model = self.narrator._resolve_model(text_model)
             except Exception:
-                pass  # disk check is best-effort; never block rendering on it
+                pass
 
-            s = state.settings
-            
-            # Set background color settings in config for compositor to use
-            if s.get('bg_color'):
-                config.BACKGROUND_COLOR_HEX = s.get('bg_color')
-            if s.get('color_opacity') is not None:
-                config.COLOR_OVERLAY_OPACITY = s.get('color_opacity')
-            
-            # Handle custom background path
-            custom_bg = s.get('custom_bg_path', '')
-            if custom_bg and not os.path.isabs(custom_bg):
-                custom_bg = os.path.join(config.BACKGROUNDS_DIR, custom_bg)
-            
-            # Generate individual clips instead of concatenating
-            from pipeline.compositor import generate_individual_clips
-            clip_metadata = generate_individual_clips(
-                panels_to_use, state,
-                resolution=s.get('video_resolution', '1080p'),
-                fps=s.get('video_fps', 30),
-                quality=s.get('video_quality', 'medium'),
-                bg_mode=s.get('bg_mode', 'blur'),
-                custom_bg_path=custom_bg,
-                animation_style=s.get('animation_style', 'auto'),
-                watermark_path=s.get('watermark_path', ''),
-                progress_callback=lambda c, t, m: self._emit_progress('video', c, t, m))
-            
-            # Store clip metadata in state
-            state.video_clips = clip_metadata
-            state.stage = 'clips_done'
+            chapters = list(state.chapter_list) if state.is_batch and len(state.chapter_list) > 1 else [state.current_chapter]
+            chapter_entries = []
+            total_panels = 0
+
+            # Reuse the already cropped art panels and the OCR/visual descriptions
+            # from AniFlow's existing extraction stage. No additional crop or vision pass.
+            for chapter_index, chapter_number in enumerate(chapters, start=1):
+                if self._should_cancel:
+                    raise InterruptedError("Создание сценария отменено")
+                if state.is_batch and len(state.chapter_list) > 1:
+                    state.switch_to_chapter(chapter_number)
+
+                if not state.panels:
+                    raise ValueError(
+                        f"В главе {chapter_number} нет кадров после штатной обработки Crop 2."
+                    )
+
+                text_panels = {
+                    str(item.get('panel_id')): item
+                    for item in (state.panels_with_text or [])
+                    if item.get('panel_id') is not None
+                }
+                enriched = []
+                for original in state.panels:
+                    panel = dict(original)
+                    parent_id = panel.get('parent_panel_id')
+                    text_item = text_panels.get(str(parent_id)) if parent_id is not None else None
+                    if text_item is None:
+                        text_item = text_panels.get(str(panel.get('panel_id')))
+                    if text_item:
+                        if not panel.get('text'):
+                            panel['text'] = text_item.get('text', '')
+                        panel['visual_description'] = (
+                            text_item.get('visual_description')
+                            or text_item.get('description')
+                            or panel.get('visual_description', '')
+                        )
+                    enriched.append(panel)
+
+                chapter_entries.append((chapter_number, enriched))
+                total_panels += len(enriched)
+                self._emit_progress(
+                    'full_recap_script', chapter_index, len(chapters),
+                    f"Подготовлено глав: {chapter_index}/{len(chapters)}; кадров: {total_panels}"
+                )
+
+            all_panels = merge_chapter_panels(chapter_entries)
+            for index, panel in enumerate(all_panels, start=1):
+                panel['sequence_number'] = index
+            if not all_panels:
+                raise ValueError("После обработки AniFlow нет кадров для сценария.")
+
+            if state.is_batch and len(state.chapter_list) > 1 and state.current_chapter != first_chapter:
+                state.switch_to_chapter(first_chapter)
+
+            self._emit_progress(
+                'full_recap_script', 0, len(all_panels),
+                f"Пишем подробный пересказ по {len(all_panels)} готовым кадрам…"
+            )
+            context = build_panel_context(all_panels, scene_size=20)
+            target_words = int(settings.get('full_recap_target_words', 5000) or 5000)
+            result = generate_full_recap_script(
+                context,
+                backend,
+                text_model,
+                style_profile=settings.get('full_recap_style') or RECAP_STYLE_PROFILE_RU,
+                story_context=settings.get('full_recap_story_context', ''),
+                target_words=target_words,
+                progress_callback=lambda current, total, message: self._emit_progress(
+                    'full_recap_script', current, total, message
+                ),
+            )
+
+            word_count = count_words(result['full_text'])
+            duration = target_video_duration_seconds(word_count)
+            state.full_recap_panels = all_panels
+            state.full_recap_workspace_dir = state.project_dir
+            state.full_recap_panel_context = context
+            state.full_recap_script = result['full_text']
+            state.full_recap_word_count = word_count
+            state.full_recap_duration_seconds = duration
+            state.full_recap_export_dir = None
+            state.full_recap_video_path = None
+            state.full_recap_status = "script_ready"
+            state.full_recap_titles = []
+            state.full_recap_selected_title = None
+            state.full_recap_thumbnails = []
+            state.full_recap_description = ""
+            state.full_recap_pinned_comment = ""
+            state.full_recap_package_status = "not_started"
+            state.error = None
+
+            recap_dir = os.path.join(state.project_dir, "full_recap")
+            os.makedirs(recap_dir, exist_ok=True)
+            with open(os.path.join(recap_dir, "script.txt"), "w", encoding="utf-8") as f:
+                f.write(result['full_text'].strip() + "\n")
+            with open(os.path.join(recap_dir, "recap_script.json"), "w", encoding="utf-8") as f:
+                json.dump({
+                    **result,
+                    "chapters": chapters,
+                    "panel_count": len(all_panels),
+                    "word_count": word_count,
+                    "target_duration_seconds": duration,
+                    "seconds_per_word": 0.72,
+                }, f, ensure_ascii=False, indent=2)
+            state.save()
+            self._emit_progress(
+                'full_recap_script', 1, 1,
+                f"Сценарий готов: {word_count} слов; расчётная длительность видео {duration / 3600:.2f} ч."
+            )
+        except Exception as e:
+            try:
+                if state.is_batch and state.chapter_list and state.current_chapter != first_chapter:
+                    state.switch_to_chapter(first_chapter)
+            except Exception:
+                pass
+            state.error = str(e)
+            state.full_recap_status = "script_failed"
+            state.save()
+        return state
+
+    def step_full_recap_video(self, state):
+        """Export the existing numbered panels as a silent video sized by script word count."""
+        if not (state.full_recap_script or "").strip():
+            state.error = "Сначала создайте и сохраните полный сценарий."
+            state.save()
+            return state
+        if not (state.full_recap_panels or state.panels):
+            state.error = "В проекте нет готовых панелей после штатной обработки AniFlow."
+            state.save()
+            return state
+        try:
+            from pipeline.full_recap_renderer import build_silent_recap_export
+            settings = state.settings
+            workspace = state.full_recap_workspace_dir or state.project_dir
+            export_dir = os.path.join(workspace, "full_recap", "export")
+            self._emit_progress('full_recap_video', 0, 1, "Нумерация кадров и подготовка немого видео…")
+
+            result = build_silent_recap_export(
+                state.full_recap_panels or state.panels,
+                state.full_recap_script,
+                export_dir,
+                resolution=settings.get('video_resolution', '1080p_landscape'),
+                fps=int(settings.get('video_fps', 30)),
+                quality=settings.get('video_quality', 'medium'),
+                animation_style=settings.get('animation_style', 'auto'),
+                progress_callback=lambda current, total, message: self._emit_progress(
+                    'full_recap_video', current, total, message
+                ),
+            )
+            state.full_recap_word_count = result['word_count']
+            state.full_recap_duration_seconds = result['duration_seconds']
+            state.full_recap_export_dir = result['export_dir']
+            state.full_recap_video_path = result['video_path']
+            state.full_recap_status = "video_ready"
             state.error = None
             state.save()
-            
-            total_duration = sum(clip['duration'] for clip in clip_metadata)
-            self._emit_progress('video', 1, 1,
-                f"Generated {len(clip_metadata)} clips! Total duration: {total_duration:.1f}s")
+            self._emit_progress(
+                'full_recap_video', 1, 1,
+                f"Немое видео готово: {result['duration_hms']}; кадров: {result['panel_count']}."
+            )
         except Exception as e:
             state.error = str(e)
+            state.full_recap_status = "video_failed"
+            state.save()
+        return state
+
+
+    def step_full_recap_package(self, state):
+        """Generate three factual title options and three reference-guided thumbnails."""
+        if not state.full_recap_script:
+            state.error = "Сначала создайте полный сценарий."
+            state.save()
+            return state
+        try:
+            from pipeline.full_recap_media import (
+                generate_title_options, generate_thumbnail_variants, list_reference_files
+            )
+            s = state.settings
+            backend = self.narrator.transport
+            text_model = s.get('full_recap_text_model') or getattr(
+                config, 'TEXT_WRITER_MODEL', config.OLLAMA_MODEL
+            )
+            try:
+                text_model = self.narrator._resolve_model(text_model)
+            except Exception:
+                pass
+            vision_model = getattr(self.narrator, 'vision_model', None) or config.VISION_MODEL
+
+            workspace = state.full_recap_workspace_dir or state.project_dir
+            # Built-in title and thumbnail style profiles use the three supplied
+            # competitor examples. Episode-specific screenshots are optional
+            # overrides and are never required to generate a package.
+            title_refs = list_reference_files(workspace, "titles")
+            title_ref_paths = [item["path"] for item in title_refs]
+            self._emit_progress('full_recap_package', 0, 6, "Подготовка встроенного стиля и материалов выпуска…")
+
+            self._emit_progress('full_recap_package', 0, 6, "Подготовка названий и референсов…")
+            title_result = generate_title_options(
+                state.full_recap_script,
+                state.full_recap_panel_context,
+                backend,
+                text_model,
+                title_reference_text=s.get('full_recap_title_reference_text', ''),
+                title_reference_paths=title_ref_paths,
+                vision_model=vision_model,
+            )
+            state.full_recap_titles = title_result["titles"]
+            state.full_recap_description = title_result["description"]
+            state.full_recap_pinned_comment = title_result["pinned_comment"]
+            state.full_recap_selected_title = None
+            state.full_recap_package_status = "titles_ready"
+            state.save()
+
+            image_model = s.get('openai_image_model') or os.getenv(
+                'OPENAI_IMAGE_MODEL', 'gpt-image-2.5-sunburst'
+            )
+            thumbnails = generate_thumbnail_variants(
+                state.full_recap_workspace_dir or state.project_dir,
+                state.full_recap_script,
+                state.full_recap_panel_context,
+                state.full_recap_panels or state.panels,
+                state.full_recap_titles,
+                model=image_model,
+                base_url=os.getenv('OPENAI_API_BASE_URL', 'https://api.openai.com/v1'),
+                progress_callback=lambda c, t, m: self._emit_progress(
+                    'full_recap_package', c + 1, 6, m
+                ),
+            )
+            state.full_recap_thumbnails = [
+                {key: value for key, value in item.items() if key != 'path'}
+                for item in thumbnails
+            ]
+            state.full_recap_package_status = "ready"
+            state.error = None
+            package_dir = os.path.join(workspace, "full_recap")
+            os.makedirs(package_dir, exist_ok=True)
+            youtube_package = {
+                "titles": state.full_recap_titles,
+                "selected_title": state.full_recap_selected_title,
+                "description": state.full_recap_description,
+                "pinned_comment": state.full_recap_pinned_comment,
+            }
+            with open(os.path.join(package_dir, "youtube_package.json"), "w", encoding="utf-8") as f:
+                json.dump(youtube_package, f, ensure_ascii=False, indent=2)
+
+            # The downloadable export ZIP should contain the entire finished
+            # video package, not only the MP4 and numbered source panels.
+            if state.full_recap_export_dir and os.path.isdir(state.full_recap_export_dir):
+                from pipeline.full_recap_renderer import add_youtube_package_to_export
+                add_youtube_package_to_export(
+                    state.full_recap_export_dir,
+                    titles=state.full_recap_titles,
+                    description=state.full_recap_description,
+                    pinned_comment=state.full_recap_pinned_comment,
+                    selected_title=state.full_recap_selected_title,
+                    thumbnails=thumbnails,
+                )
+            state.save()
+            self._emit_progress('full_recap_package', 6, 6, "Готовы 3 названия, 3 обложки, описание и закреплённый комментарий.")
+        except Exception as e:
+            state.error = str(e)
+            state.full_recap_package_status = "failed"
             state.save()
         return state
 
     # ─── Scene Flow Steps (YouTube-style) ────────────────────────────
-
-    def step_classify_panels(self, state):
-        """Classify every panel as action / standard / epic and set target_duration."""
-        valid = ('clips_done', 'cropped2', 'text_extracted', 'text_removed', 'narrated',
-                 'audio_done', 'video_done')
-        if state.stage not in valid:
-            state.error = "Must crop art panels first (Crop 2)."
-            return state
-        if not state.panels:
-            state.error = "No panels to classify."
-            state.save()
-            return state
-
-        self._emit_progress('classify_panels', 0, 1, "Classifying panels (action / standard / epic)...")
-        try:
-            from pipeline.panel_classifier import classify_all_panels, get_classification_summary
-            state.panels = classify_all_panels(state.panels, force=True)
-            summary = get_classification_summary(state.panels)
-            state.error = None
-            state.save()
-            msg = (f"\u2705 Classified {len(state.panels)} panels — "
-                   f"action:{summary['action']} standard:{summary['standard']} epic:{summary['epic']}")
-            self._emit_progress('classify_panels', 1, 1, msg)
-        except Exception as e:
-            state.error = str(e)
-            state.save()
-        return state
-
-    def step_narrate_scenes(self, state):
-        """Generate YouTube-style scene-grouped narrations (1 narration per 3-5 panels)."""
-        valid = ('clips_done', 'cropped2', 'text_extracted', 'text_removed', 'narrated',
-                 'audio_done', 'video_done')
-        if state.stage not in valid:
-            state.error = "Must crop art panels first (Crop 2)."
-            return state
-        if not state.panels:
-            state.error = "No panels available."
-            state.save()
-            return state
-
-        s = state.settings
-        backend = self.narrator.transport
-        from pipeline.scene_narrator import SCENE_SIZE_DEFAULT
-        scene_size = int(s.get('scene_size', SCENE_SIZE_DEFAULT))
-
-        # Determine models for decoupled pipeline
-        decoupled = getattr(config, 'DECOUPLED_NARRATION', True)
-        if decoupled:
-            # Phase 2 text model — use the dedicated text writer
-            text_model = getattr(config, 'TEXT_WRITER_MODEL', 'qwen2.5:14b')
-            # Resolve it against installed models
-            text_model = self.narrator._resolve_model(text_model)
-            # Phase 1 vision model
-            vision_model = self.narrator.vision_model
-            print(f"[NarrateScenes] DECOUPLED: Vision={vision_model}, Text={text_model}")
-        else:
-            text_model = s.get('ollama_model', config.OLLAMA_MODEL)
-            vision_model = None
-            print(f"[NarrateScenes] LEGACY: Model={text_model}")
-
-        self._emit_progress('narrate_scenes', 0, 1, "Starting scene narration...")
-        try:
-            from pipeline.scene_narrator import narrate_all_scenes
-            cast_characters = self._load_cast_characters(state)
-
-            # Pre-populate panel dialogue from extracted chapter text
-            # so scene_narrator._extract_panel_dialogue() has data to work with
-            txt_dir = os.path.join(config.EXTRACTED_TXT_DIR, state.manhwa_name)
-            txt_path = os.path.join(txt_dir, f"Chapter_{state.current_chapter:05d}.txt")
-            if os.path.exists(txt_path):
-                import re as _re
-                with open(txt_path, 'r', encoding='utf-8') as f:
-                    dialogue_text = f.read()
-                panel_blocks = _re.split(r'\[PANEL\s+(\d+)\]', dialogue_text)
-                text_by_idx = {}
-                for j in range(1, len(panel_blocks) - 1, 2):
-                    try:
-                        pnum = int(panel_blocks[j])
-                        content = panel_blocks[j + 1].strip()
-                        if content and content != '(no dialogue)':
-                            text_by_idx[pnum] = content
-                    except (ValueError, IndexError):
-                        pass
-                assigned = 0
-                for panel in state.panels:
-                    if not panel.get('text'):
-                        dlg = text_by_idx.get(panel['panel_id'], '')
-                        if dlg:
-                            panel['text'] = dlg
-                            assigned += 1
-                if assigned:
-                    print(f"[NarrateScenes] Pre-populated dialogue for {assigned}/{len(state.panels)} panels from chapter text")
-
-            state.panels = narrate_all_scenes(
-                panels=state.panels,
-                project_dir=state.project_dir,
-                backend=backend,
-                model=text_model,
-                scene_size=scene_size,
-                cast_characters=cast_characters,
-                progress_callback=lambda c, t, m: self._emit_progress('narrate_scenes', c, t, m),
-                cancel_check=lambda: self._should_cancel,
-                vision_model=vision_model,
-            )
-            # Check if it returned early due to cancellation
-            if self._should_cancel:
-                self._emit_progress('narrate_scenes', 0, 1, "Cancelled scene narration.")
-                return state
-            # Always copy scene_narration → narration so the UI displays the latest
-            for panel in state.panels:
-                if panel.get('scene_narration'):
-                    panel['narration'] = panel['scene_narration']
-            state.stage = 'narrated'
-            state.error = None
-            state.settings['scene_mode'] = True
-            state.save()
-            n_scenes = len(set(p.get('scene_id','') for p in state.panels if p.get('scene_id')))
-            self._emit_progress('narrate_scenes', 1, 1,
-                f"\u2705 Scene narration done — {n_scenes} scenes, {len(state.panels)} panels tagged")
-        except Exception as e:
-            state.error = str(e)
-            state.save()
-        return state
-
-    def step_generate_scene_audio(self, state):
-        """Generate TTS for scene narrations (one audio file per scene)."""
-        valid = ('clips_done', 'narrated', 'audio_done', 'video_done')
-        if state.stage not in valid:
-            state.error = "Must run Scene Narrate first."
-            return state
-        # Check panels have scene narrations
-        has_scene = any(p.get('scene_narration') for p in state.panels)
-        if not has_scene:
-            state.error = "No scene narrations found. Run Scene Narrate first."
-            state.save()
-            return state
-
-        self._emit_progress('scene_audio', 0, 1, "Generating scene audio...")
-        try:
-            from pipeline.scene_narrator import generate_scene_audio
-            s = state.settings
-            state.panels = generate_scene_audio(
-                panels=state.panels,
-                project_dir=state.project_dir,
-                voice=s.get('tts_voice'),
-                rate=s.get('tts_rate'),
-                engine=s.get('tts_engine', 'edge'),
-                speed=float(s.get('tts_speed', 1.0)),
-                progress_callback=lambda c, t, m: self._emit_progress('scene_audio', c, t, m),
-            )
-            state.stage = 'audio_done'
-            state.settings['scene_mode'] = True
-            state.error = None
-            state.save()
-            n_audio = sum(1 for p in state.panels if p.get('scene_audio_path'))
-            self._emit_progress('scene_audio', 1, 1,
-                f"\u2705 Scene audio done — {n_audio} scene audio files generated")
-        except Exception as e:
-            state.error = str(e)
-            state.save()
-        return state
-
-    def step_export_scene_clips(self, state):
-        """Render one MP4 per scene — fast, resumable, CapCut-ready."""
-        valid = ('clips_done', 'narrated', 'audio_done', 'video_done')
-        if state.stage not in valid:
-            state.error = "Must generate scene audio first (C. Scene Audio)."
-            return state
-        has_scenes = any(p.get('scene_id') for p in state.panels)
-        if not has_scenes:
-            state.error = "No scene data found. Run A→B→C steps first."
-            state.save()
-            return state
-
-        self._emit_progress('scene_clips', 0, 1, "Starting per-scene clip export...")
-        try:
-            from pipeline.compositor import export_scene_clips
-            s = state.settings
-            results = export_scene_clips(
-                panels=state.panels,
-                project_dir=state.project_dir,
-                resolution=s.get('video_resolution', '1080p'),
-                fps=s.get('video_fps', 30),
-                quality=s.get('video_quality', 'medium'),
-                bg_mode=s.get('bg_mode', 'blur'),
-                animation_style=s.get('animation_style', 'auto'),
-                progress_callback=lambda c, t, m: self._emit_progress('scene_clips', c, t, m),
-            )
-            done  = [r for r in results if r.get('path') and not r.get('error')]
-            errs  = [r for r in results if r.get('error')]
-            total_dur = sum(r.get('duration', 0) for r in done)
-            state.stage = 'video_done'
-            state.error = None
-            state.save()
-            msg = (f"\u2705 Scene clips done — {len(done)}/{len(results)} clips, "
-                   f"total {total_dur/60:.1f} min")
-            if errs:
-                msg += f" ({len(errs)} failed)"
-            self._emit_progress('scene_clips', len(results), len(results), msg)
-        except Exception as e:
-            state.error = str(e)
-            state.save()
-        return state
 
     def rewrite_script(self, state, style="dramatic", custom_instructions=None):
         self._emit_progress('rewrite', 0, len(state.panels), f"Rewriting in {style} style...")
@@ -3018,210 +2684,6 @@ class Orchestrator:
         return out
 
     # ─── Simplified Auto Pipeline (No Narration) ────────────────────
-    def step_auto_pipeline(self, project_name, source_folder=None, settings=None):
-        """
-        Fully automatic pipeline: Load → Stitch → Detect 1 → Crop 1 →
-        Extract Text → Audio (from text) → Video.
-
-        No narration step. Extracted dialogue text goes directly to TTS.
-        Output structure per chapter:
-          texts/p{N}.txt    — extracted dialogue
-          audio/p{N}.mp3    — TTS audio
-          clips/clip_{N}.mp4 — per-panel video clip
-          <Chapter>_recap.mp4 — final combined video
-        """
-        self._running = True
-        self._should_cancel = False
-
-        # Step 1: Load
-        self._emit_progress('auto_pipeline', 0, 7, "Step 1/7: Loading images...")
-        state = self.step_load_images(project_name, source_folder or '')
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        if settings:
-            state.settings.update(settings)
-            state.save()
-
-        # Step 2: Stitch
-        self._emit_progress('auto_pipeline', 1, 7, "Step 2/7: Stitching images...")
-        state = self.step_stitch(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-
-        # Step 3: Detect 1 (bubble text model)
-        self._emit_progress('auto_pipeline', 2, 7, "Step 3/7: Detecting panels (bubble text model)...")
-        state = self.step_detect_bubble_text(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-
-        # Step 4: Crop 1
-        self._emit_progress('auto_pipeline', 3, 7, "Step 4/7: Cropping detected panels...")
-        state = self.step_crop_bubble_text_panels(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-
-        # Step 5: Extract dialogue text from panels using qwen2.5vl:3b
-        self._emit_progress('auto_pipeline', 4, 7, "Step 5/7: Extracting text from panels (qwen2.5vl:3b)...")
-        state = self.step_extract_dialogue_text(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-
-        # Save per-panel text files
-        texts_dir = os.path.join(state.project_dir, "texts")
-        os.makedirs(texts_dir, exist_ok=True)
-        for pwt in state.panels_with_text:
-            pid = pwt['panel_id']
-            txt_content = pwt.get('text', '(no dialogue)')
-            txt_path = os.path.join(texts_dir, f"p{pid}.txt")
-            with open(txt_path, 'w', encoding='utf-8') as f:
-                f.write(txt_content)
-        print(f"[AutoPipeline] Saved {len(state.panels_with_text)} text files to {texts_dir}")
-
-        # Step 6: Generate audio from extracted text (not narration)
-        self._emit_progress('auto_pipeline', 5, 7, "Step 6/7: Generating audio from extracted text...")
-        try:
-            from pipeline.tts_engine import generate_all_audio
-            s = state.settings
-            state.panels_with_text = generate_all_audio(
-                state.panels_with_text, state.project_dir,
-                voice=s.get('tts_voice'),
-                rate=s.get('tts_rate'),
-                engine=s.get('tts_engine', 'edge'),
-                speed=s.get('tts_speed', 1.0),
-                progress_callback=lambda c, t, m: self._emit_progress('tts', c, t, m),
-                text_field='text',
-            )
-            state.stage = 'audio_done'
-            state.error = None
-            state.save()
-        except Exception as e:
-            state.error = f"Audio generation failed: {e}"
-            state.save()
-            self._running = False
-            return state
-
-        if self._should_cancel:
-            self._running = False
-            return state
-
-        # Step 7: Compose video — per-panel clips + final combined video
-        self._emit_progress('auto_pipeline', 6, 7, "Step 7/7: Composing video...")
-        try:
-            from pipeline.compositor import compose_video
-            s = state.settings
-
-            # Use panels_with_text as the visual/audio source
-            video_panels = state.panels_with_text
-
-            output_path = compose_video(
-                video_panels, state.project_dir,
-                resolution=s.get('video_resolution', '1080p'),
-                fps=s.get('video_fps', 30),
-                quality=s.get('video_quality', 'medium'),
-                bgm_path=s.get('bgm_path', ''),
-                watermark_path=s.get('watermark_path', ''),
-                bg_mode=s.get('bg_mode', 'blur'),
-                custom_bg_path=s.get('custom_bg_path', ''),
-                intro_path=s.get('intro_path', ''),
-                outro_path=s.get('outro_path', ''),
-                export_clips=config.AUTO_PIPELINE_EXPORT_CLIPS,
-                animation_style=s.get('animation_style', 'auto'),
-                scene_mode=False,
-                progress_callback=lambda c, t, m: self._emit_progress('video', c, t, m),
-            )
-            state.video_path = output_path
-            state.stage = 'video_done'
-            state.error = None
-            state.save()
-
-            from pipeline.compositor import get_video_info
-            info = get_video_info(output_path)
-            print(f"[AutoPipeline] Video complete: {output_path}")
-            print(f"[AutoPipeline] Duration: {info.get('duration', 0):.1f}s, Size: {info.get('size_mb', 0):.1f}MB")
-        except Exception as e:
-            state.error = f"Video composition failed: {e}"
-            state.save()
-
-        self._running = False
-        self._emit_progress('auto_pipeline', 7, 7, "✅ Auto pipeline complete!")
-        return state
-
-    # ─── Full Auto Pipeline (Legacy with Narration) ───────────────
-    def run_full_pipeline(self, project_name, source_folder, settings=None):
-        self._running = True
-        self._should_cancel = False
-        state = self.step_load_images(project_name, source_folder)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        if settings:
-            state.settings.update(settings)
-            state.save()
-        state = self.step_stitch(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        panel_method = state.settings.get('panel_method', 'geometric')
-        if panel_method == 'yolo':
-            state = self.step_crop_panels_yolo(state)
-        else:
-            state = self.step_crop_panels(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_extract_text(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_remove_text_boxes(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_narrate(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_generate_audio(state)
-        if state.error or self._should_cancel:
-            self._running = False
-            return state
-        state = self.step_compose_video(state)
-        self._running = False
-        return state
-
-    def resume_pipeline(self, project_name):
-        state = PipelineState.load(project_name)
-        self._running = True
-        self._should_cancel = False
-        stage_steps = {
-            'loaded': [self.step_stitch, self._route_crop_panels, self.step_extract_text,
-                       self.step_remove_text_boxes, self.step_narrate,
-                       self.step_generate_audio, self.step_compose_video],
-            'stitched': [self._route_crop_panels, self.step_extract_text,
-                         self.step_remove_text_boxes, self.step_narrate,
-                         self.step_generate_audio, self.step_compose_video],
-            'cropped': [self.step_extract_text, self.step_remove_text_boxes,
-                        self.step_narrate, self.step_generate_audio,
-                        self.step_compose_video],
-            'text_extracted': [self.step_remove_text_boxes, self.step_narrate,
-                               self.step_generate_audio, self.step_compose_video],
-            'text_removed': [self.step_narrate, self.step_generate_audio,
-                             self.step_compose_video],
-            'narrated': [self.step_generate_audio, self.step_compose_video],
-            'audio_done': [self.step_compose_video],
-        }
-        for step_fn in stage_steps.get(state.stage, []):
-            if self._should_cancel: break
-            state = step_fn(state)
-            if state.error: break
-        self._running = False
-        return state
-
     def _route_crop_panels(self, state):
         panel_method = state.settings.get('panel_method', 'geometric')
         if panel_method == 'yolo':

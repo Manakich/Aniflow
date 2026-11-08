@@ -4,6 +4,13 @@ Full-featured Flask app with all pipeline controls.
 """
 import os, json, threading, shutil, re, sys
 
+# Load local API keys without ever committing them to the repository.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+except ImportError:
+    pass
+
 # Line-buffer stdout/stderr so redirected logs (server.log) update live
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -14,13 +21,7 @@ from flask import (Flask, render_template, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 import config
 from pipeline.orchestrator import Orchestrator, PipelineState
-from pipeline.narrator import Narrator
-from pipeline.tts_engine import get_available_voices, get_tts_status
 from pipeline.cast_system import Cast, list_casts
-from pipeline.script_rewriter import ScriptRewriter
-from pipeline.capcut_director import CapCutDirector
-from pipeline.kokoro_tts import KOKORO_AVAILABLE
-from pipeline.elevenlabs_tts import get_elevenlabs_tts, ELEVENLABS_AVAILABLE
 from pipeline.panel_extractor_yolo import get_global_extractor, get_global_bubble_extractor
 from pipeline.web_scraper import analyze_url, download_chapters, list_downloaded_manga, get_download_root
 from pipeline import character_builder as charbuilder
@@ -35,7 +36,6 @@ app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'aniflow-dev-key')
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB upload limit
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 orchestrator = Orchestrator()
-narrator = Narrator()
 pipeline_thread = None
 
 def progress_callback(stage, current, total, message):
@@ -53,7 +53,6 @@ def index():
 @app.route('/api/status', methods=['GET'])
 def get_status():
     deps = orchestrator.check_dependencies()
-    deps['tts'] = get_tts_status()
     return jsonify(deps)
 
 @app.route('/api/projects', methods=['GET'])
@@ -287,6 +286,267 @@ def browse_folder():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/full-recap/<project_name>', methods=['GET'])
+def get_full_recap(project_name):
+    """Return script, numbered-panel metadata, silent video and YouTube package."""
+    state = PipelineState.load(project_name)
+    panels = state.full_recap_panels or state.panels
+    return jsonify({
+        'status': state.full_recap_status,
+        'script': state.full_recap_script,
+        'word_count': state.full_recap_word_count,
+        'duration_seconds': state.full_recap_duration_seconds,
+        'video_path': state.full_recap_video_path,
+        'export_dir': state.full_recap_export_dir,
+        'panel_count': len(panels),
+        'panels': [
+            {
+                'panel_id': panel.get('panel_id'),
+                'sequence_number': panel.get('sequence_number', index),
+                'source_chapter': panel.get('source_chapter'),
+            }
+            for index, panel in enumerate(panels, start=1)
+        ],
+        'titles': state.full_recap_titles,
+        'selected_title': state.full_recap_selected_title,
+        'thumbnails': [
+            {key: value for key, value in item.items() if key != 'path'}
+            for item in state.full_recap_thumbnails
+        ],
+        'description': state.full_recap_description,
+        'pinned_comment': state.full_recap_pinned_comment,
+        'package_status': state.full_recap_package_status,
+        'settings': {
+            'full_recap_text_model': state.settings.get('full_recap_text_model', ''),
+            'full_recap_style': state.settings.get('full_recap_style', ''),
+            'full_recap_target_words': state.settings.get('full_recap_target_words', 5000),
+            'video_resolution': state.settings.get('video_resolution', '1080p_landscape'),
+            'animation_style': state.settings.get('animation_style', 'auto'),
+        },
+    })
+
+
+@app.route('/api/full-recap/<project_name>/references/<kind>', methods=['POST'])
+def upload_full_recap_references(project_name, kind):
+    """Upload separate visual-style or title-style reference screenshots."""
+    if kind not in ('thumbnails', 'titles'):
+        return jsonify({'error': 'Reference type must be thumbnails or titles'}), 400
+    try:
+        from pipeline.full_recap_media import save_reference_uploads
+        state = PipelineState.load(project_name)
+        uploads = request.files.getlist('files')
+        if not uploads:
+            return jsonify({'error': 'Выберите хотя бы один файл'}), 400
+        saved = save_reference_uploads(state.full_recap_workspace_dir or state.project_dir, kind, uploads)
+        state.full_recap_package_status = 'references_updated'
+        state.save()
+        return jsonify({
+            'status': 'uploaded',
+            'kind': kind,
+            'files': [{'filename': item['filename'], 'name': item['name']} for item in saved],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/full-recap/<project_name>/references/<kind>', methods=['DELETE'])
+def clear_full_recap_references(project_name, kind):
+    """Clear one reference set before preparing a different video."""
+    if kind not in ('thumbnails', 'titles'):
+        return jsonify({'error': 'Reference type must be thumbnails or titles'}), 400
+    try:
+        from pipeline.full_recap_media import clear_reference_files
+        state = PipelineState.load(project_name)
+        removed = clear_reference_files(
+            state.full_recap_workspace_dir or state.project_dir, kind
+        )
+        state.full_recap_package_status = 'references_updated'
+        state.save()
+        return jsonify({'status': 'cleared', 'kind': kind, 'removed': removed})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/full-recap/<project_name>/package', methods=['GET'])
+def get_full_recap_package(project_name):
+    """Return generated metadata and uploaded reference filenames."""
+    try:
+        from pipeline.full_recap_media import list_reference_files
+        state = PipelineState.load(project_name)
+        return jsonify({
+            'status': state.full_recap_package_status,
+            'titles': state.full_recap_titles,
+            'selected_title': state.full_recap_selected_title,
+            'description': state.full_recap_description,
+            'pinned_comment': state.full_recap_pinned_comment,
+            'thumbnails': [
+                {key: value for key, value in item.items() if key != 'path'}
+                for item in state.full_recap_thumbnails
+            ],
+            'thumbnail_references': [
+                item['filename'] for item in list_reference_files(state.full_recap_workspace_dir or state.project_dir, 'thumbnails')
+            ],
+            'title_references': [
+                item['filename'] for item in list_reference_files(state.full_recap_workspace_dir or state.project_dir, 'titles')
+            ],
+            'settings': {
+                'openai_image_model': state.settings.get('openai_image_model', 'gpt-image-2'),
+                'full_recap_title_reference_text': state.settings.get('full_recap_title_reference_text', ''),
+            },
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/full-recap/<project_name>/package/selection', methods=['PUT'])
+def select_full_recap_title(project_name):
+    data = request.get_json(silent=True) or {}
+    selected = data.get('index')
+    state = PipelineState.load(project_name)
+    try:
+        selected = int(selected)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Номер варианта должен быть числом'}), 400
+    if selected < 0 or selected >= len(state.full_recap_titles):
+        return jsonify({'error': 'Такого варианта названия нет'}), 400
+    state.full_recap_selected_title = state.full_recap_titles[selected]
+    workspace = state.full_recap_workspace_dir or state.project_dir
+    package_dir = os.path.join(workspace, 'full_recap')
+    os.makedirs(package_dir, exist_ok=True)
+    package = {
+        'titles': state.full_recap_titles,
+        'selected_title': state.full_recap_selected_title,
+        'description': state.full_recap_description,
+        'pinned_comment': state.full_recap_pinned_comment,
+    }
+    with open(os.path.join(package_dir, 'youtube_package.json'), 'w', encoding='utf-8') as file:
+        json.dump(package, file, ensure_ascii=False, indent=2)
+
+    if state.full_recap_export_dir and os.path.isdir(state.full_recap_export_dir):
+        from pipeline.full_recap_renderer import add_youtube_package_to_export
+        thumb_root = os.path.join(package_dir, 'thumbnails')
+        thumbnails = [
+            {
+                **item,
+                'path': os.path.join(thumb_root, item.get('filename', '')),
+            }
+            for item in state.full_recap_thumbnails
+        ]
+        add_youtube_package_to_export(
+            state.full_recap_export_dir,
+            titles=state.full_recap_titles,
+            description=state.full_recap_description,
+            pinned_comment=state.full_recap_pinned_comment,
+            selected_title=state.full_recap_selected_title,
+            thumbnails=thumbnails,
+        )
+    state.save()
+    return jsonify({'status': 'selected', 'title': state.full_recap_selected_title})
+
+
+@app.route('/api/full-recap/<project_name>/references/<kind>/<filename>', methods=['GET'])
+def serve_full_recap_reference(project_name, kind, filename):
+    from pipeline.full_recap_media import ALLOWED_IMAGE_EXTENSIONS
+    if kind not in ('thumbnails', 'titles'):
+        return jsonify({'error': 'Unknown reference kind'}), 404
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or os.path.splitext(safe_name)[1].lower() not in ALLOWED_IMAGE_EXTENSIONS:
+        return jsonify({'error': 'Invalid filename'}), 400
+    state = PipelineState.load(project_name)
+    folder = os.path.join(state.full_recap_workspace_dir or state.project_dir, 'full_recap', 'references', kind)
+    if not os.path.isfile(os.path.join(folder, safe_name)):
+        return jsonify({'error': 'Reference not found'}), 404
+    return send_from_directory(folder, safe_name)
+
+
+@app.route('/api/full-recap/<project_name>/thumbnails/<filename>', methods=['GET'])
+def serve_full_recap_thumbnail(project_name, filename):
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or not safe_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        return jsonify({'error': 'Invalid filename'}), 400
+    state = PipelineState.load(project_name)
+    folder = os.path.join(state.full_recap_workspace_dir or state.project_dir, 'full_recap', 'thumbnails')
+    if not os.path.isfile(os.path.join(folder, safe_name)):
+        return jsonify({'error': 'Thumbnail not found'}), 404
+    return send_from_directory(folder, safe_name)
+
+
+@app.route('/api/full-recap/<project_name>/video', methods=['GET'])
+def serve_full_recap_video(project_name):
+    """Stream the rendered Full Recap MP4."""
+    state = PipelineState.load(project_name)
+    path = state.full_recap_video_path
+    if not path or not os.path.isfile(path):
+        return jsonify({'error': 'Full Recap video has not been rendered yet'}), 404
+    return send_file(path, mimetype='video/mp4', as_attachment=False)
+
+
+@app.route('/api/full-recap/<project_name>/export', methods=['GET'])
+def download_full_recap_export(project_name):
+    """Download the complete silent-video project folder as a ZIP archive."""
+    import zipfile
+    state = PipelineState.load(project_name)
+    export_dir = state.full_recap_export_dir
+    if not export_dir or not os.path.isdir(export_dir):
+        return jsonify({'error': 'Сначала создайте немое видео и папку экспорта'}), 404
+
+    archive_path = os.path.join(os.path.dirname(export_dir), 'full_recap_export.zip')
+    with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=4) as archive:
+        for root, _dirs, files in os.walk(export_dir):
+            for filename in files:
+                file_path = os.path.join(root, filename)
+                archive.write(file_path, os.path.relpath(file_path, export_dir))
+
+    download_name = f"{state.manhwa_name or project_name}_full_recap_export.zip"
+    return send_file(archive_path, as_attachment=True, download_name=download_name)
+
+
+@app.route('/api/full-recap/<project_name>/script/download', methods=['GET'])
+def download_full_recap_script(project_name):
+    """Download the complete Russian script as a standalone UTF-8 text file."""
+    state = PipelineState.load(project_name)
+    workspace = state.full_recap_workspace_dir or state.project_dir
+    script_path = os.path.join(workspace, 'full_recap', 'script.txt')
+    if not os.path.isfile(script_path):
+        return jsonify({'error': 'Сначала создайте и сохраните сценарий'}), 404
+    filename = f"{state.manhwa_name or project_name}_script.txt"
+    return send_file(script_path, as_attachment=True, download_name=filename)
+
+
+@app.route('/api/full-recap/<project_name>/script', methods=['PUT'])
+def update_full_recap_script(project_name):
+    """Save an edited recap script and recalculate its silent-video duration."""
+    from pipeline.recap_script_writer import count_words, target_video_duration_seconds
+    data = request.get_json(silent=True) or {}
+    full_text = str(data.get('full_text') or '').strip()
+    if not full_text:
+        return jsonify({'error': 'Сценарий не может быть пустым'}), 400
+
+    state = PipelineState.load(project_name)
+    state.full_recap_script = full_text
+    state.full_recap_word_count = count_words(full_text)
+    state.full_recap_duration_seconds = target_video_duration_seconds(state.full_recap_word_count)
+    state.full_recap_video_path = None
+    state.full_recap_export_dir = None
+    state.full_recap_status = 'script_edited'
+    state.error = None
+
+    workspace = state.full_recap_workspace_dir or state.project_dir
+    script_dir = os.path.join(workspace, 'full_recap')
+    os.makedirs(script_dir, exist_ok=True)
+    with open(os.path.join(script_dir, 'script.txt'), 'w', encoding='utf-8') as file:
+        file.write(full_text + '\n')
+    state.save()
+    return jsonify({
+        'status': 'saved',
+        'characters': len(full_text),
+        'word_count': state.full_recap_word_count,
+        'duration_seconds': state.full_recap_duration_seconds,
+    })
+
+
+
+
 @app.route('/api/projects/<name>/state', methods=['GET'])
 def get_project_state(name):
     """Lightweight state read — just settings + panel metadata (no heavy image data)."""
@@ -304,126 +564,6 @@ def get_project_state(name):
     })
 
 # ─── Pipeline Execution ─────────────────────────────────────────
-@app.route('/api/run/full', methods=['POST'])
-def run_full_pipeline():
-    global pipeline_thread
-    data = request.json
-    project_name = data.get('project_name', '').strip()
-    source_folder = data.get('source_folder', '').strip()
-    settings = data.get('settings', {})
-    if not project_name:
-        return jsonify({'error': 'Project name is required'}), 400
-    if not source_folder or not os.path.isdir(source_folder):
-        return jsonify({'error': 'Valid source folder path is required'}), 400
-    def run():
-        socketio.emit('pipeline_started', {'project': project_name})
-        state = orchestrator.run_full_pipeline(project_name, source_folder, settings)
-        socketio.emit('pipeline_complete', {'project': project_name, 'stage': state.stage,
-                                            'error': state.error, 'video_path': state.video_path})
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'started', 'project': project_name})
-
-@app.route('/api/run/auto-pipeline', methods=['POST'])
-def run_auto_pipeline():
-    """Simplified auto pipeline: Load → Stitch → Detect 1 → Crop 1 →
-    Extract Text → Audio (from text) → Video. No narration step."""
-    global pipeline_thread
-    if pipeline_thread and pipeline_thread.is_alive():
-        return jsonify({'error': 'A pipeline is already running. Wait for it to finish.', 'status': 'busy'}), 409
-    data = request.json
-    project_name = data.get('project_name', '').strip()
-    settings = data.get('settings', {})
-    if not project_name:
-        return jsonify({'error': 'Project name is required'}), 400
-    def run():
-        socketio.emit('pipeline_started', {'project': project_name, 'mode': 'auto'})
-        state = orchestrator.step_auto_pipeline(project_name, settings=settings)
-        socketio.emit('pipeline_complete', {'project': project_name, 'stage': state.stage,
-                                            'error': state.error, 'video_path': state.video_path,
-                                            'mode': 'auto'})
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'started', 'project': project_name, 'mode': 'auto'})
-
-@app.route('/api/run/load-and-process', methods=['POST'])
-def run_load_and_process():
-    """Run Load → Stitch → Crop → Extract Text → Remove Text in a single thread."""
-    global pipeline_thread
-    data = request.json
-    project_name = data.get('project_name', '').strip()
-    source_folder = data.get('source_folder', '').strip()
-    settings = data.get('settings', {})
-    steps = data.get('steps', ['stitch', 'crop', 'extract_text', 'remove_text'])
-    if not project_name:
-        return jsonify({'error': 'Project name is required'}), 400
-    if not source_folder or not os.path.isdir(source_folder):
-        return jsonify({'error': 'Valid source folder path is required'}), 400
-    def run():
-        # Step 1: Load
-        socketio.emit('step_started', {'step': 'load', 'project': project_name})
-        state = orchestrator.step_load_images(project_name, source_folder)
-        if settings:
-            state.settings.update(settings)
-            state.save()
-        socketio.emit('step_complete', {'step': 'load', 'project': project_name,
-            'stage': state.stage, 'error': state.error,
-            'panels_count': len(state.panels), 'video_path': state.video_path})
-        if state.error:
-            return
-
-        # Step 2: Stitch
-        if 'stitch' in steps:
-            socketio.emit('step_started', {'step': 'stitch', 'project': project_name})
-            state = orchestrator.step_stitch(state)
-            socketio.emit('step_complete', {'step': 'stitch', 'project': project_name,
-                'stage': state.stage, 'error': state.error,
-                'panels_count': len(state.panels), 'video_path': state.video_path})
-            if state.error:
-                return
-
-        # Step 3: Detect
-        if 'detect' in steps:
-            socketio.emit('step_started', {'step': 'detect', 'project': project_name})
-            state = orchestrator.step_detect_panels_yolo(state)
-            socketio.emit('step_complete', {'step': 'detect', 'project': project_name,
-                'stage': state.stage, 'error': state.error,
-                'panels_count': len(state.panels), 'video_path': state.video_path})
-            if state.error:
-                return
-
-        # Step 4: Crop
-        if 'crop' in steps:
-            socketio.emit('step_started', {'step': 'crop', 'project': project_name})
-            state = orchestrator.step_crop_extracted_panels(state)
-            socketio.emit('step_complete', {'step': 'crop', 'project': project_name,
-                'stage': state.stage, 'error': state.error,
-                'panels_count': len(state.panels), 'video_path': state.video_path})
-            if state.error:
-                return
-
-        # Step 5: Extract Text
-        if 'extract_text' in steps:
-            socketio.emit('step_started', {'step': 'extract_text', 'project': project_name})
-            state = orchestrator.step_extract_text(state)
-            socketio.emit('step_complete', {'step': 'extract_text', 'project': project_name,
-                'stage': state.stage, 'error': state.error,
-                'panels_count': len(state.panels), 'video_path': state.video_path})
-            if state.error:
-                return
-
-        # Step 5: Remove Text Boxes
-        if 'remove_text' in steps:
-            socketio.emit('step_started', {'step': 'remove_text', 'project': project_name})
-            state = orchestrator.step_remove_text_boxes(state)
-            socketio.emit('step_complete', {'step': 'remove_text', 'project': project_name,
-                'stage': state.stage, 'error': state.error,
-                'panels_count': len(state.panels), 'video_path': state.video_path})
-
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'started', 'project': project_name})
-
 def _run_with_settings(step_fn, project_name, data):
     """Load state, patch settings from request data, then run step_fn."""
     state = PipelineState.load(project_name)
@@ -432,8 +572,8 @@ def _run_with_settings(step_fn, project_name, data):
         state.settings.update(settings_patch)
         state.save()
     # Also accept top-level convenience keys
-    for key in ('scene_size', 'scene_mode', 'ollama_model', 'tts_voice',
-                'tts_engine', 'tts_speed', 'pipeline_mode'):
+    for key in ('ollama_model', 'pipeline_mode', 'full_recap_text_model',
+                'full_recap_style', 'full_recap_story_context', 'full_recap_target_words'):
         if key in data:
             state.settings[key] = data[key]
     return step_fn(state)
@@ -462,26 +602,11 @@ def run_step(step_name):
     project_name = data.get('project_name', '')
     step_map = {
         'load': lambda: _load_with_settings(project_name, data.get('source_folder', ''), data.get('settings', {})),
-        'stitch': lambda: orchestrator.step_stitch(PipelineState.load(project_name)),
-        'detect': lambda: orchestrator.step_detect_panels_yolo(PipelineState.load(project_name)),
-        'detect1': lambda: orchestrator.step_detect_bubble_text(PipelineState.load(project_name)),
-        'crop1': lambda: orchestrator.step_crop_bubble_text_panels(PipelineState.load(project_name)),
-        'stitch2': lambda: orchestrator.step_stitch_bubble_panels(PipelineState.load(project_name)),
-        'detect2': lambda: orchestrator.step_detect_art_panels(PipelineState.load(project_name)),
-        'crop2': lambda: orchestrator.step_crop_art_panels(PipelineState.load(project_name)),
-        'crop': lambda: orchestrator.step_crop_extracted_panels(PipelineState.load(project_name)),
-        'extract_text': lambda: orchestrator.step_extract_dialogue_text(PipelineState.load(project_name)),
-        'extract_dialogue': lambda: orchestrator.step_extract_dialogue_text(PipelineState.load(project_name)),
-        'remove_text': lambda: orchestrator.step_remove_text_boxes(PipelineState.load(project_name)),
-        'narrate': lambda: orchestrator.step_narrate(PipelineState.load(project_name)),
-        'narrate_mapped': lambda: _run_with_settings(orchestrator.step_narrate_mapped, project_name, data),
-        'audio': lambda: _run_with_settings(orchestrator.step_generate_audio, project_name, data),
-        'video': lambda: _run_with_settings(orchestrator.step_compose_video, project_name, data),
-        # Scene Flow (YouTube-style)
-        'classify_panels': lambda: orchestrator.step_classify_panels(PipelineState.load(project_name)),
-        'narrate_scenes': lambda: _run_with_settings(orchestrator.step_narrate_scenes, project_name, data),
-        'scene_audio': lambda: _run_with_settings(orchestrator.step_generate_scene_audio, project_name, data),
-        'scene_clips': lambda: _run_with_settings(orchestrator.step_export_scene_clips, project_name, data),
+        # The original AniFlow image/OCR stages are invoked internally by one preparation command.
+        'full_recap_prepare': lambda: orchestrator.step_full_recap_prepare(PipelineState.load(project_name)),
+        'full_recap_script': lambda: _run_with_settings(orchestrator.step_full_recap_script, project_name, data),
+        'full_recap_video': lambda: _run_with_settings(orchestrator.step_full_recap_video, project_name, data),
+        'full_recap_package': lambda: _run_with_settings(orchestrator.step_full_recap_package, project_name, data),
     }
     if step_name not in step_map:
         return jsonify({'error': f'Unknown step: {step_name}'}), 400
@@ -496,400 +621,12 @@ def run_step(step_name):
     pipeline_thread.start()
     return jsonify({'status': 'started', 'step': step_name})
 
-# ─── 🚀 Full Batch Pipeline (one-click, all steps × all chapters) ───────
-
-BATCH_STEP_FNS = {
-    'stitch': 'step_stitch',
-    'detect1': 'step_detect_bubble_text',
-    'crop1': 'step_crop_bubble_text_panels',
-    'stitch2': 'step_stitch_bubble_panels',
-    'detect2': 'step_detect_art_panels',
-    'crop2': 'step_crop_art_panels',
-    'extract_dialogue': 'step_extract_dialogue_text',
-    'remove_text': 'step_remove_text_boxes',
-    'narrate_mapped': 'step_narrate_mapped',
-    'audio': 'step_generate_audio',
-    'video': 'step_compose_video',
-}
-
-
-def _notify_done(title, message):
-    """Best-effort macOS notification + sound so long batches can run unattended."""
-    try:
-        import subprocess
-        if sys.platform == 'darwin':
-            safe_msg = message.replace('"', "'").replace('\\', '')[:200]
-            safe_title = title.replace('"', "'")
-            subprocess.run(
-                ['osascript', '-e',
-                 f'display notification "{safe_msg}" with title "{safe_title}" sound name "Glass"'],
-                capture_output=True, timeout=10)
-    except Exception as e:
-        print(f"[Notify] Could not send notification: {e}")
-
-
-def _infer_chapter_stage_light(manhwa_dir, ch_folder):
-    """Read a chapter's progress WITHOUT creating any directories (used by the
-    dashboard — safe to scan projects that were never opened). Prefers the
-    authoritative state.json stage; falls back to scanning output folders."""
-    manhwa_name = os.path.basename(manhwa_dir)
-    state_path = os.path.join(manhwa_dir, ch_folder, 'state.json')
-    saved_error = None
-    if os.path.exists(state_path):
-        try:
-            with open(state_path) as f:
-                data = json.load(f)
-            if data.get('stage'):
-                return data['stage'], data.get('error')
-            saved_error = data.get('error')
-        except Exception:
-            pass
-
-    def count(dirpath, pred):
-        try:
-            return sum(1 for f in os.listdir(dirpath) if pred(f))
-        except OSError:
-            return 0
-
-    img_exts = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.img')
-    if count(os.path.join(config.MANHWA_CLIPS_DIR, manhwa_name, ch_folder), lambda f: f.endswith('.mp4')):
-        return 'clips_done', saved_error
-    if count(os.path.join(config.MANHWA_AUDIO_DIR, manhwa_name, ch_folder), lambda f: f.endswith('.mp3')):
-        return 'audio_done', saved_error
-    if count(os.path.join(config.MANHWA_TEXT_DIR, manhwa_name, ch_folder), lambda f: f.endswith(('.txt', '.json'))):
-        return 'text_extracted', saved_error
-    if count(os.path.join(config.MANHWA_CROP_DIR, manhwa_name, ch_folder), lambda f: f.startswith('panel_') and f.endswith(('.jpg', '.png'))):
-        return 'cropped1', saved_error
-    if os.path.exists(os.path.join(config.MANHWA_DETECT_DIR, manhwa_name, ch_folder, 'detection_boxes.json')):
-        return 'detected1', saved_error
-    if count(os.path.join(config.MANHWA_STITCH_DIR, manhwa_name, ch_folder), lambda f: f.startswith('stitched_')):
-        return 'stitched', saved_error
-    if count(os.path.join(manhwa_dir, ch_folder), lambda f: f.lower().endswith(img_exts)):
-        return 'loaded', saved_error
-    return 'init', saved_error
-
-
-@app.route('/api/batch-projects', methods=['GET'])
-def batch_projects():
-    """Batch dashboard: every manhwa in manhwa_download with per-chapter stages."""
-    root = config.MANHWA_DOWNLOAD_DIR
-    result = []
-    if not os.path.isdir(root):
-        return jsonify(result)
-    for manhwa in sorted(os.listdir(root)):
-        manhwa_dir = os.path.join(root, manhwa)
-        if not os.path.isdir(manhwa_dir):
-            continue
-        ch_folders = sorted(
-            d for d in os.listdir(manhwa_dir)
-            if d.startswith('Chapter_') and os.path.isdir(os.path.join(manhwa_dir, d))
-        )
-        chapters = []
-        saved_settings = None
-        for chf in ch_folders:
-            stage, saved_error = _infer_chapter_stage_light(manhwa_dir, chf)
-            num_match = re.search(r'(\d+)', chf)
-            images = sum(1 for f in os.listdir(os.path.join(manhwa_dir, chf))
-                         if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.img'))) \
-                if os.path.isdir(os.path.join(manhwa_dir, chf)) else 0
-            # Pull saved pipeline settings from the most complete chapter
-            if saved_settings is None:
-                state_path = os.path.join(manhwa_dir, chf, 'state.json')
-                if os.path.exists(state_path):
-                    try:
-                        with open(state_path) as f:
-                            data = json.load(f)
-                        if data.get('settings'):
-                            saved_settings = data['settings']
-                    except Exception:
-                        pass
-            chapters.append({
-                'chapter': int(num_match.group(1)) if num_match else 0,
-                'folder': chf,
-                'stage': stage,
-                'error': saved_error,
-                'images': images,
-            })
-        if not chapters and not os.path.exists(os.path.join(manhwa_dir, 'manga_info.json')):
-            continue  # skip unrelated folders with no chapter data at all
-        # Hide phantom chapters (e.g. an auto-created empty Chapter_00000)
-        chapters = [c for c in chapters if not (c['stage'] == 'init' and c['images'] == 0)]
-        result.append({
-            'name': manhwa,
-            'display_name': manhwa.replace('-', ' '),
-            'chapters': chapters,
-            'total': len(chapters),
-            'with_images': sum(1 for c in chapters if c['stage'] != 'init'),
-            'settings': saved_settings or {},
-        })
-    return jsonify(result)
-
-
-@app.route('/api/batch-projects/<name>', methods=['DELETE'])
-def delete_batch_project(name):
-    """🗑️ Wipe ALL pipeline data for a manhwa: downloads, stitched strips,
-    detections, crops, text, audio and clips. Irreversible."""
-    global pipeline_thread
-    if pipeline_thread and pipeline_thread.is_alive():
-        return jsonify({'error': 'A pipeline step is running — wait for it to finish before deleting.',
-                        'status': 'busy'}), 409
-    # Safety: reject path traversal and hidden/invalid names
-    if (not name or '/' in name or '\\' in name or '..' in name
-            or name.startswith('.') or name != name.strip()):
-        return jsonify({'error': 'Invalid project name'}), 400
-
-    roots = [config.MANHWA_DOWNLOAD_DIR, config.MANHWA_STITCH_DIR, config.MANHWA_DETECT_DIR,
-             config.MANHWA_CROP_DIR, config.MANHWA_TEXT_DIR, config.MANHWA_AUDIO_DIR,
-             config.MANHWA_CLIPS_DIR]
-    removed = []
-    for root in roots:
-        target = os.path.join(root, name)
-        # Double-check the target is a DIRECT child of the root (no traversal)
-        if os.path.isdir(target) and os.path.dirname(os.path.realpath(target)) == os.path.realpath(root):
-            shutil.rmtree(target, ignore_errors=True)
-            removed.append(target)
-    if not removed:
-        return jsonify({'error': 'Project not found'}), 404
-    print(f"[Delete] Wiped project '{name}' from {len(removed)} folders")
-    return jsonify({'status': 'deleted', 'removed': len(removed)})
-
-
-@app.route('/api/run/full-batch', methods=['POST'])
-def run_full_batch():
-    """🚀 One-click full pipeline: chains Load → Stitch → Detect → Crop →
-    Extract → Audio → Clips across ALL chapters, with live progress events
-    and a per-chapter summary at the end."""
-    global pipeline_thread
-    if pipeline_thread and pipeline_thread.is_alive():
-        return jsonify({'error': 'A pipeline step is already running. Wait for it to finish.', 'status': 'busy'}), 409
-    data = request.json or {}
-    project_name = (data.get('project_name') or '').strip()
-    settings = data.get('settings', {})
-    source_folder = (data.get('source_folder') or '').strip()
-    steps = data.get('steps') or ['stitch', 'detect1', 'crop1', 'extract_dialogue', 'audio', 'video']
-    if not project_name:
-        return jsonify({'error': 'project_name is required'}), 400
-
-    def run():
-        orchestrator._should_cancel = False
-        state = PipelineState.load(project_name)
-        if settings:
-            state.settings.update(settings)
-            state.save()
-        config.SPEED_MODE = bool(state.settings.get('fast_mode', False))
-        config.SPEED_SETTINGS = {'kokoro_gpu': bool(state.settings.get('kokoro_gpu', True))}
-
-        total_chapters = len(state.chapter_list) if state.is_batch else 1
-        socketio.emit('batch_pipeline_started', {
-            'project': project_name, 'steps': steps, 'total_chapters': total_chapters})
-
-        # Optional load step (Source page one-click flow)
-        if source_folder:
-            if orchestrator._should_cancel:
-                socketio.emit('batch_pipeline_complete', {'project': project_name, 'cancelled': True})
-                return
-            socketio.emit('batch_step_started', {'step': 'load', 'project': project_name,
-                                                 'total_chapters': total_chapters})
-            state = orchestrator.step_load_images(project_name, source_folder)
-            if settings:
-                state.settings.update(settings)
-                state.save()
-            if getattr(state, 'error', None):
-                socketio.emit('batch_pipeline_complete',
-                              {'project': project_name, 'error': f"load: {state.error}"})
-                _notify_done('Manhwa Batch Failed', f"{project_name}: load failed")
-                return
-
-        for step_name in steps:
-            fn_name = BATCH_STEP_FNS.get(step_name)
-            if not fn_name:
-                continue
-            if orchestrator._should_cancel:
-                break
-            socketio.emit('batch_step_started', {'step': step_name, 'project': project_name,
-                                                 'total_chapters': total_chapters})
-            state = PipelineState.load(project_name)
-            state = getattr(orchestrator, fn_name)(state)
-            if getattr(state, 'error', None):
-                socketio.emit('batch_pipeline_complete',
-                              {'project': project_name, 'error': f"{step_name}: {state.error}"})
-                _notify_done('Manhwa Batch Failed', f"{project_name}: {step_name} failed")
-                return
-
-        cancelled = orchestrator._should_cancel
-
-        # Per-chapter summary straight from disk (stage + error per chapter)
-        chapters_summary = []
-        if state.is_batch:
-            for ch in state.chapter_list:
-                ch_state = PipelineState.load_chapter(state.manhwa_name, ch)
-                chapters_summary.append({'chapter': ch, 'stage': ch_state.stage,
-                                         'error': ch_state.error})
-        else:
-            chapters_summary.append({'chapter': state.current_chapter,
-                                     'stage': state.stage, 'error': state.error})
-
-        done = sum(1 for c in chapters_summary if c['stage'] in ('clips_done', 'video_done'))
-        if cancelled:
-            socketio.emit('batch_pipeline_complete', {'project': project_name,
-                                                      'cancelled': True, 'chapters': chapters_summary})
-        else:
-            socketio.emit('batch_pipeline_complete', {'project': project_name,
-                                                      'chapters': chapters_summary,
-                                                      'clips_ready': done})
-            _notify_done('Manhwa Batch Complete',
-                         f"{project_name}: {done}/{len(chapters_summary)} chapters ready")
-
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'started', 'project': project_name})
-
-
-@app.route('/api/browse-file', methods=['POST'])
-def browse_file():
-    """Open a native FILE picker (for custom background / watermark paths)."""
-    try:
-        import platform
-        import subprocess
-        if platform.system() == 'Darwin':
-            script = '''
-            tell application "System Events"
-                activate
-                set filePath to choose file with prompt "Select image"
-                return POSIX path of filePath
-            end tell
-            '''
-            result = subprocess.run(['osascript', '-e', script],
-                                    capture_output=True, text=True, timeout=60)
-            if result.returncode == 0 and result.stdout.strip():
-                return jsonify({'path': result.stdout.strip()})
-            elif 'User canceled' in result.stderr:
-                return jsonify({'cancelled': True}), 200
-            return jsonify({'error': 'File selection failed'}), 400
-        return jsonify({'error': 'File browser only supported on macOS — paste the path manually'}), 400
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': 'File selection timeout'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/run/batch', methods=['POST'])
-def run_batch():
-    global pipeline_thread
-    if pipeline_thread and pipeline_thread.is_alive():
-        pipeline_thread.join(timeout=2)
-    data = request.json
-    projects = data.get('projects', [])
-    steps = data.get('steps', [])
-    
-    if not projects or not steps:
-        return jsonify({'error': 'No projects or steps provided'}), 400
-        
-    def run():
-        orchestrator._should_cancel = False
-        socketio.emit('batch_started', {'steps': steps, 'total': len(projects)})
-        for idx, p in enumerate(projects):
-            if orchestrator._should_cancel:
-                break
-                
-            project_name = p.get('name') if isinstance(p, dict) else p
-            folder = p.get('folder') if isinstance(p, dict) else ''
-            
-            socketio.emit('batch_progress', {
-                'current_idx': idx + 1, 'total': len(projects), 'project': project_name
-            })
-            
-            # Create/Load state
-            state = PipelineState.load(project_name)
-            
-            STAGE_ORDER = [
-                None, 'new', 'loaded', 'stitched', 'detected1', 'cropped1', 
-                'stitched2', 'detected2', 'cropped2', 'text_extracted', 'narrated',
-                'audio_generated', 'video_generated'
-            ]
-            STEP_TO_STAGE = {
-                'load': 'loaded',
-                'stitch': 'stitched',
-                'detect1': 'detected1',
-                'crop1': 'cropped1',
-                'stitch2': 'stitched2',
-                'detect2': 'detected2',
-                'crop2': 'cropped2',
-                'extract_dialogue': 'text_extracted',
-                'narrate_mapped': 'narrated'
-            }
-            
-            for step_name in steps:
-                if orchestrator._should_cancel: break
-                
-                # Skip if already done
-                if state:
-                    current_stage_idx = STAGE_ORDER.index(state.stage) if state.stage in STAGE_ORDER else 0
-                    target_stage = STEP_TO_STAGE.get(step_name)
-                    target_stage_idx = STAGE_ORDER.index(target_stage) if target_stage in STAGE_ORDER else 999
-                    
-                    if current_stage_idx >= target_stage_idx:
-                        print(f"[Batch] Skipping '{step_name}' - project already at '{state.stage}'")
-                        continue
-                        
-                socketio.emit('step_started', {'step': step_name, 'project': project_name})
-                
-                if step_name == 'load':
-                    state = orchestrator.step_load_images(project_name, folder)
-                elif step_name == 'stitch':
-                    state = orchestrator.step_stitch(state)
-                elif step_name == 'detect':
-                    state = orchestrator.step_detect_panels_yolo(state)
-                elif step_name == 'detect1':
-                    state = orchestrator.step_detect_bubble_text(state)
-                elif step_name == 'crop1':
-                    state = orchestrator.step_crop_bubble_text_panels(state)
-                elif step_name == 'stitch2':
-                    state = orchestrator.step_stitch_bubble_panels(state)
-                elif step_name == 'detect2':
-                    state = orchestrator.step_detect_art_panels(state)
-                elif step_name == 'crop2':
-                    state = orchestrator.step_crop_art_panels(state)
-                elif step_name == 'crop':
-                    state = orchestrator.step_crop_extracted_panels(state)
-                elif step_name == 'extract_text':
-                    state = orchestrator.step_extract_dialogue_text(state)
-                elif step_name == 'extract_dialogue':
-                    state = orchestrator.step_extract_dialogue_text(state)
-                elif step_name == 'remove_text':
-                    state = orchestrator.step_remove_text_boxes(state)
-                elif step_name == 'narrate':
-                    state = orchestrator.step_narrate(state)
-                elif step_name == 'narrate_mapped':
-                    state = orchestrator.step_narrate_mapped(state)
-                # handle error
-                if getattr(state, 'error', None):
-                    break
-                    
-        socketio.emit('batch_complete', {'steps': steps})
-        
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'batch_started', 'count': len(projects)})
-
 @app.route('/api/debug', methods=['GET'])
 def debug_info():
     return jsonify({
         'should_cancel': getattr(orchestrator, '_should_cancel', False),
         'thread_alive': pipeline_thread.is_alive() if pipeline_thread else False
     })
-
-@app.route('/api/run/resume/<project_name>', methods=['POST'])
-def resume_pipeline(project_name):
-    global pipeline_thread
-    def run():
-        socketio.emit('pipeline_started', {'project': project_name})
-        state = orchestrator.resume_pipeline(project_name)
-        socketio.emit('pipeline_complete', {'project': project_name, 'stage': state.stage,
-                                            'error': state.error, 'video_path': state.video_path})
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'resumed', 'project': project_name})
 
 @app.route('/api/cancel', methods=['POST'])
 def cancel_pipeline():
@@ -917,147 +654,12 @@ def get_ai_backends():
         'claude': {'available': True, 'models': ['claude-sonnet-4-20250514', 'claude-opus-4-20250514']},
     }
     try:
-        ollama_info = narrator.check_ollama()
+        ollama_info = orchestrator.narrator.check_ollama()
         backends['ollama']['available'] = ollama_info.get('available', False)
         backends['ollama']['models'] = ollama_info.get('models', [])
     except Exception:
         pass
     return jsonify(backends)
-
-@app.route('/api/narrate/gemini', methods=['POST'])
-def narrate_with_gemini():
-    """Generate narration using Google Gemini API."""
-    global pipeline_thread
-    data = request.json
-    project_name = data.get('project_name', '')
-    api_key = data.get('api_key', '')
-    model = data.get('model', 'gemini-2.5-flash')
-
-    if not project_name:
-        return jsonify({'error': 'Project name is required'}), 400
-    if not api_key:
-        return jsonify({'error': 'Gemini API key is required'}), 400
-
-    def run():
-        socketio.emit('step_started', {'step': 'narrate', 'project': project_name})
-        state = PipelineState.load(project_name)
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            gmodel = genai.GenerativeModel(model)
-
-            total = len(state.panels)
-            for i, panel in enumerate(state.panels):
-                socketio.emit('progress', {
-                    'stage': 'narrate', 'current': i + 1, 'total': total,
-                    'message': f'Narrating panel {i+1}/{total}...',
-                    'percent': int(((i + 1) / max(total, 1)) * 100)
-                })
-                text = panel.get('text', '') or panel.get('dialogue', '')
-                if not text:
-                    panel['narration'] = ''
-                    continue
-                prompt = f"""You are a professional manhwa narrator. Rewrite this dialogue into dramatic 3rd-person narration (2-4 sentences). Present tense, vivid, cinematic.
-
-Dialogue: {text}
-
-Write ONLY the narration, nothing else."""
-                try:
-                    response = gmodel.generate_content(prompt)
-                    panel['narration'] = response.text.strip()
-                except Exception as e:
-                    panel['narration'] = text  # fallback to original text
-
-            state.stage = 'narrated'
-            state.error = None
-            state.save()
-            socketio.emit('step_complete', {'step': 'narrate', 'project': project_name,
-                'stage': state.stage, 'error': None, 'panels_count': len(state.panels)})
-        except ImportError:
-            state.error = 'google-generativeai package not installed. Run: pip install google-generativeai'
-            state.save()
-            socketio.emit('step_complete', {'step': 'narrate', 'project': project_name,
-                'stage': state.stage, 'error': state.error, 'panels_count': len(state.panels)})
-        except Exception as e:
-            state.error = f'Gemini narration failed: {e}'
-            state.save()
-            socketio.emit('step_complete', {'step': 'narrate', 'project': project_name,
-                'stage': state.stage, 'error': state.error, 'panels_count': len(state.panels)})
-
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'started', 'backend': 'gemini'})
-
-
-@app.route('/api/narrate/claude', methods=['POST'])
-def narrate_with_claude():
-    """Generate narration using Anthropic Claude API."""
-    global pipeline_thread
-    data = request.json
-    project_name = data.get('project_name', '')
-    api_key = data.get('api_key', '')
-    model = data.get('model', 'claude-sonnet-4-20250514')
-
-    if not project_name:
-        return jsonify({'error': 'Project name is required'}), 400
-    if not api_key:
-        return jsonify({'error': 'Claude API key is required'}), 400
-
-    def run():
-        socketio.emit('step_started', {'step': 'narrate', 'project': project_name})
-        state = PipelineState.load(project_name)
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-
-            total = len(state.panels)
-            for i, panel in enumerate(state.panels):
-                socketio.emit('progress', {
-                    'stage': 'narrate', 'current': i + 1, 'total': total,
-                    'message': f'Narrating panel {i+1}/{total}...',
-                    'percent': int(((i + 1) / max(total, 1)) * 100)
-                })
-                text = panel.get('text', '') or panel.get('dialogue', '')
-                if not text:
-                    panel['narration'] = ''
-                    continue
-                try:
-                    msg = client.messages.create(
-                        model=model,
-                        max_tokens=300,
-                        messages=[{
-                            'role': 'user',
-                            'content': f"""You are a professional manhwa narrator. Rewrite this dialogue into dramatic 3rd-person narration (2-4 sentences). Present tense, vivid, cinematic.
-
-Dialogue: {text}
-
-Write ONLY the narration, nothing else."""
-                        }]
-                    )
-                    panel['narration'] = msg.content[0].text.strip()
-                except Exception as e:
-                    panel['narration'] = text  # fallback
-
-            state.stage = 'narrated'
-            state.error = None
-            state.save()
-            socketio.emit('step_complete', {'step': 'narrate', 'project': project_name,
-                'stage': state.stage, 'error': None, 'panels_count': len(state.panels)})
-        except ImportError:
-            state.error = 'anthropic package not installed. Run: pip install anthropic'
-            state.save()
-            socketio.emit('step_complete', {'step': 'narrate', 'project': project_name,
-                'stage': state.stage, 'error': state.error, 'panels_count': len(state.panels)})
-        except Exception as e:
-            state.error = f'Claude narration failed: {e}'
-            state.save()
-            socketio.emit('step_complete', {'step': 'narrate', 'project': project_name,
-                'stage': state.stage, 'error': state.error, 'panels_count': len(state.panels)})
-
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'started', 'backend': 'claude'})
-
 
 # ─── Panel Management ────────────────────────────────────────────
 @app.route('/api/projects/<project_name>/boxes', methods=['POST'])
@@ -1081,7 +683,7 @@ def save_stitched_boxes_2(project_name):
 def update_panel_text(project_name, panel_id):
     """Update the EXTRACTED DIALOGUE text of a bubble panel (dialogue-mode
     review step). Keeps everything downstream in sync:
-      - panels_with_text[i]['text']          (used by dialogue-mode TTS)
+      - panels_with_text[i]['text']          (used by the plot recap context)
       - art panels' inherited 'text'         (narration context)
       - output/extracted_txt/... .txt cache  ([PANEL N] blocks)
     """
@@ -1134,70 +736,6 @@ def update_panel_text(project_name, panel_id):
     state.save()
     return jsonify({'status': 'updated', 'panel_id': panel_id, 'text': new_text})
 
-
-@app.route('/api/panels/<project_name>/<int:panel_id>/narration', methods=['PUT'])
-def update_narration(project_name, panel_id):
-    state = PipelineState.load(project_name)
-    new_narration = request.json.get('narration', '')
-    state.panels = narrator.update_narration(state.panels, panel_id, new_narration, state.project_dir)
-    # Keep the mapped-narration cache (output/narration/...) in sync so a
-    # later re-run of Narrate doesn't clobber this manual edit
-    try:
-        narration_json = os.path.join(config.NARRATION_DIR, state.manhwa_name,
-                                      f"Chapter_{state.current_chapter:05d}", "narration.json")
-        if os.path.exists(narration_json):
-            with open(narration_json, 'r', encoding='utf-8') as f:
-                cached = json.load(f)
-            for entry in cached:
-                if entry.get('panel_id') == panel_id:
-                    entry['narration'] = new_narration
-            with open(narration_json, 'w', encoding='utf-8') as f:
-                json.dump(cached, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"[NarrationEdit] Cache sync failed: {e}")
-    state.save()
-    return jsonify({'status': 'updated', 'panel_id': panel_id})
-
-@app.route('/api/panels/<project_name>/<int:panel_id>/regenerate', methods=['POST'])
-def regenerate_narration(project_name, panel_id):
-    state = PipelineState.load(project_name)
-    panel = next((p for p in state.panels if p['panel_id'] == panel_id), None)
-    if not panel:
-        return jsonify({'error': 'Panel not found'}), 404
-    custom_prompt = request.json.get('prompt')
-
-    # Re-narrate with the SAME context the batch narration used: cast profiles,
-    # cast reference faces, the panel's dialogue and a sliding window over
-    # neighbouring dialogue so the rewritten line still flows with the chapter.
-    cast_characters = orchestrator._load_cast_characters(state)
-    cast_reference_images = orchestrator._load_cast_reference_images(state)
-
-    panels = state.panels
-    idx = next((i for i, p in enumerate(panels) if p['panel_id'] == panel_id), -1)
-
-    def _txt(i):
-        if 0 <= i < len(panels):
-            return panels[i].get('text', '') or ''
-        return ''
-
-    sliding_window = (
-        f"--- PREVIOUS PANEL DIALOGUE ---\n{_txt(idx - 1)}\n\n"
-        f"--- CURRENT PANEL DIALOGUE ---\n{_txt(idx)}\n\n"
-        f"--- NEXT PANEL DIALOGUE ---\n{_txt(idx + 1)}"
-    )
-
-    new_narration = narrator.regenerate_panel(
-        panel, custom_prompt,
-        cast_characters=cast_characters,
-        chapter_text=sliding_window,
-        cast_reference_images=cast_reference_images)
-    if not new_narration or new_narration.startswith('['):
-        # Never overwrite the panel with an empty/failed generation
-        return jsonify({'error': new_narration or 'Writer model returned empty narration. Try again.'}), 502
-    panel['narration'] = new_narration
-    panel['scene_narration'] = new_narration
-    state.save()
-    return jsonify({'status': 'regenerated', 'narration': new_narration})
 
 @app.route('/api/panels/<project_name>/<int:panel_id>', methods=['DELETE'])
 def delete_panel(project_name, panel_id):
@@ -1334,32 +872,6 @@ def crop_panel(project_name, panel_id):
 
 
 # ─── Script Rewriter ─────────────────────────────────────────────
-@app.route('/api/rewrite/<project_name>', methods=['POST'])
-def rewrite_script(project_name):
-    global pipeline_thread
-    data = request.json
-    style = data.get('style', 'dramatic')
-    custom = data.get('custom_instructions')
-    def run():
-        state = PipelineState.load(project_name)
-        socketio.emit('step_started', {'step': 'rewrite', 'project': project_name})
-        state = orchestrator.rewrite_script(state, style, custom)
-        socketio.emit('step_complete', {'step': 'rewrite', 'project': project_name,
-            'stage': state.stage, 'error': state.error, 'panels_count': len(state.panels)})
-    pipeline_thread = threading.Thread(target=run, daemon=True)
-    pipeline_thread.start()
-    return jsonify({'status': 'started', 'style': style})
-
-@app.route('/api/rewrite/styles', methods=['GET'])
-def get_rewrite_styles():
-    return jsonify(ScriptRewriter.get_styles())
-
-@app.route('/api/preview-audio/<path:filename>')
-def serve_preview_audio(filename):
-    """Serve preview audio files (supports subdirectories like kokoro/)."""
-    preview_dir = os.path.join(config.PROJECTS_DIR, '_previews')
-    return send_from_directory(preview_dir, filename)
-
 @app.route('/api/preview-detection/<project_name>/<path:page_filename>', methods=['GET'])
 def preview_detection(project_name, page_filename):
     state = PipelineState.load(project_name)
@@ -1521,7 +1033,7 @@ def build_cast_from_manga():
                 socketio.emit('progress', {'stage': 'build_cast', 'current': idx + 1, 'total': len(sample),
                     'message': f'Analyzing image {idx+1}/{len(sample)}...', 'percent': int(((idx+1)/len(sample))*100)})
                 try:
-                    chars = narrator.detect_characters(img_path)
+                    chars = orchestrator.narrator.detect_characters(img_path)
                     for ch in chars:
                         name = ch.get('name', '').strip()
                         if name and name.lower() not in ('unknown', 'narrator', 'n/a', 'none', ''):
@@ -1745,34 +1257,6 @@ def charbuilder_add_bulk():
         return jsonify({'error': str(e)}), 500
 
 # ─── CapCut Director ─────────────────────────────────────────────
-@app.route('/api/capcut/export/<project_name>', methods=['POST'])
-def export_capcut(project_name):
-    state = PipelineState.load(project_name)
-    settings = request.json or {}
-    project = orchestrator.export_capcut(state, settings)
-    return jsonify({'status': 'exported', 'project': project})
-
-@app.route('/api/capcut/subtitles/<project_name>', methods=['POST'])
-def export_subtitles(project_name):
-    state = PipelineState.load(project_name)
-    srt_path = orchestrator.export_subtitles(state)
-    return jsonify({'status': 'exported', 'path': srt_path})
-
-@app.route('/api/capcut/animations', methods=['GET'])
-def get_animations():
-    return jsonify(CapCutDirector.get_animation_presets())
-
-# ─── Export Endpoints ─────────────────────────────────────────────
-@app.route('/api/export/narration/<project_name>', methods=['GET'])
-def export_narration(project_name):
-    state = PipelineState.load(project_name)
-    narrations = [{'panel_id': p['panel_id'], 'narration': p.get('narration', ''),
-                   'source_page': p.get('source_page', '')} for p in state.panels]
-    output = os.path.join(state.project_dir, "narrations_export.json")
-    with open(output, 'w') as f:
-        json.dump(narrations, f, indent=2)
-    return send_file(output, as_attachment=True, download_name=f"{project_name}_narrations.json")
-
 @app.route('/api/export/panels/<project_name>', methods=['GET'])
 def export_panels_zip(project_name):
     import zipfile
@@ -1835,12 +1319,6 @@ def serve_panel_texts(project_name):
         return send_file(txt_path, mimetype='text/plain')
     return jsonify({'error': 'Panel texts not found'}), 404
 
-@app.route('/api/audio/<project_name>/<filename>')
-def serve_audio(project_name, filename):
-    state = PipelineState.load(project_name)
-    audio_dir = os.path.join(state.project_dir, "audio")
-    return send_from_directory(audio_dir, filename)
-
 @app.route('/api/stitched-image/<project_name>', methods=['GET', 'HEAD'])
 def get_stitched_image(project_name):
     state = PipelineState.load(project_name)
@@ -1889,386 +1367,9 @@ def get_stitched_detected_image(project_name):
         return send_file(state.stitched_preview_path)
     return jsonify({'error': 'Not found'}), 404
 
-@app.route('/api/video/<project_name>')
-def serve_video(project_name):
-    state = PipelineState.load(project_name)
-    if state.video_path and os.path.exists(state.video_path):
-        return send_file(state.video_path, mimetype='video/mp4')
-    return jsonify({'error': 'Video not found'}), 404
-
-@app.route('/api/download/<project_name>')
-def download_video(project_name):
-    state = PipelineState.load(project_name)
-    if state.video_path and os.path.exists(state.video_path):
-        return send_file(state.video_path, as_attachment=True, download_name=f"{project_name}_recap.mp4")
-    return jsonify({'error': 'Video not found'}), 404
-
-@app.route('/api/clips/<project_name>')
-def get_clips(project_name):
-    """Get list of generated clips for a project"""
-    try:
-        import re
-        
-        state = PipelineState.load(project_name)
-        
-        # Use the state's clips directory (new organized structure)
-        clips_dir = state.clips_dir
-        
-        # Fallback to old locations if clips_dir doesn't exist
-        if not os.path.exists(clips_dir):
-            # Try old location: project_dir/clips
-            old_clips_dir = os.path.join(state.project_dir, 'clips')
-            if os.path.exists(old_clips_dir):
-                clips_dir = old_clips_dir
-            else:
-                # Try alternative location: output/manhwa_panel/{project}/clips
-                alt_clips_dir = os.path.join(config.OUTPUT_DIR, project_name, 'clips')
-                if os.path.exists(alt_clips_dir):
-                    clips_dir = alt_clips_dir
-        
-        # Load panels to get text
-        panels_map = {}
-        if state.panels_with_text:
-            for p in state.panels_with_text:
-                pid = p.get('panel_id')
-                if pid:
-                    panels_map[pid] = p.get('narration') or p.get('text') or p.get('dialogue') or ''
-        
-        # Scan directory for .mp4 files
-        clips = []
-        if os.path.exists(clips_dir):
-            for filename in sorted(os.listdir(clips_dir)):
-                if filename.endswith('.mp4'):
-                    filepath = os.path.join(clips_dir, filename)
-                    
-                    # Extract panel_id from filename (e.g., "scene_0001.mp4" -> 1)
-                    match = re.search(r'scene_(\d+)', filename)
-                    panel_id = int(match.group(1)) if match else 0
-                    
-                    # Get duration from video file (optional, skip if moviepy not available)
-                    duration = 0
-                    try:
-                        from moviepy.editor import VideoFileClip
-                        clip = VideoFileClip(filepath)
-                        duration = clip.duration
-                        clip.close()
-                    except Exception as e:
-                        # If moviepy not available or fails, estimate from file size
-                        # Average bitrate assumption: ~1MB per 6 seconds
-                        file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
-                        duration = file_size_mb * 6  # Rough estimate
-                    
-                    clips.append({
-                        'clip_filename': filename,
-                        'filename': filename,  # For backward compatibility
-                        'panel_id': panel_id,
-                        'size': os.path.getsize(filepath),
-                        'duration': duration,
-                        'text': panels_map.get(panel_id, ''),
-                        'url': f'/api/clips/{project_name}/{filename}'
-                    })
-        
-        return jsonify({
-            'clips': clips,
-            'total': len(clips),
-            'clips_dir': clips_dir
-        })
-    except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
-
-@app.route('/api/clips/<project_name>/<clip_filename>')
-def serve_clip(project_name, clip_filename):
-    """Serve an individual clip file"""
-    try:
-        state = PipelineState.load(project_name)
-        
-        # Use the new organized structure
-        clip_path = os.path.join(state.clips_dir, clip_filename)
-        if os.path.exists(clip_path):
-            return send_file(clip_path, mimetype='video/mp4')
-        
-        # Fallback to old structure
-        possible_dirs = [
-            os.path.join(state.project_dir, 'clips'),
-            os.path.join(config.OUTPUT_DIR, project_name, 'clips')
-        ]
-        
-        for clips_dir in possible_dirs:
-            clip_path = os.path.join(clips_dir, clip_filename)
-            if os.path.exists(clip_path):
-                return send_file(clip_path, mimetype='video/mp4')
-        
-        return jsonify({'error': 'Clip not found'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ─── Sort Clips ──────────────────────────────────────────────────
-@app.route('/api/sort-clips', methods=['POST'])
-def sort_clips():
-    """
-    Copy and rename clips from multiple chapters into a single folder with sequential numbering.
-    
-    Request body:
-    {
-        "output_folder": "/path/to/output",
-        "start_chapter": 1,
-        "end_chapter": 5
-    }
-    """
-    try:
-        import re
-        import glob
-        from pathlib import Path
-        
-        data = request.json
-        output_folder = data.get('output_folder', '').strip()
-        start_chapter = int(data.get('start_chapter', 1))
-        end_chapter = int(data.get('end_chapter', 1))
-        
-        if not output_folder:
-            return jsonify({'error': 'Output folder is required'}), 400
-        
-        if start_chapter > end_chapter:
-            return jsonify({'error': 'Start chapter must be <= end chapter'}), 400
-        
-        # Create output folder
-        output_path = Path(output_folder)
-        output_path.mkdir(parents=True, exist_ok=True)
-        
-        # Find all project folders that match the chapter range
-        projects_dir = Path(config.PROJECTS_DIR)
-        clips_dir = Path(config.MANHWA_CLIPS_DIR)
-        
-        all_clips = []
-        clip_counter = 1
-        
-        for chapter_num in range(start_chapter, end_chapter + 1):
-            # Look for clips matching this chapter number
-            # Format: Chapter_00000, Chapter_00001, etc.
-            chapter_folder_name = f"Chapter_{chapter_num:05d}"
-            
-            found_clips = False
-            
-            # Search in manhwa_clips directory for all projects
-            for project_dir in clips_dir.iterdir():
-                if not project_dir.is_dir():
-                    continue
-                    
-                # Look for the chapter folder inside this project
-                chapter_path = project_dir / chapter_folder_name
-                
-                if chapter_path.exists() and chapter_path.is_dir():
-                    # Get all .mp4 files sorted by name
-                    mp4_files = sorted(chapter_path.glob("*.mp4"))
-                    
-                    for mp4_file in mp4_files:
-                        # Copy with sequential naming
-                        new_filename = f"{clip_counter:04d}.mp4"
-                        new_path = output_path / new_filename
-                        
-                        # Copy the file
-                        shutil.copy2(str(mp4_file), str(new_path))
-                        
-                        all_clips.append({
-                            'original': str(mp4_file),
-                            'new': str(new_path),
-                            'chapter': chapter_num,
-                            'sequence': clip_counter
-                        })
-                        
-                        clip_counter += 1
-                    
-                    found_clips = True
-            
-            if not found_clips:
-                print(f"[Sort] No clips found for chapter {chapter_num} (looking for {chapter_folder_name})")
-        
-        if len(all_clips) == 0:
-            return jsonify({
-                'error': f'No clips found for chapters {start_chapter}-{end_chapter}. Make sure you have generated video clips first (step 7-9).',
-                'searched_in': str(clips_dir),
-                'expected_format': f'Chapter_{start_chapter:05d}'
-            }), 404
-        
-        return jsonify({
-            'success': True,
-            'total_clips': len(all_clips),
-            'copied_clips': len(all_clips),
-            'output_folder': str(output_path),
-            'chapter_range': f'{start_chapter}-{end_chapter}',
-            'clips': all_clips[:10]  # Return first 10 for reference
-        })
-        
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-
-
-# ─── TTS Voices ──────────────────────────────────────────────────
-@app.route('/api/voices', methods=['GET'])
-def get_voices():
-    try:
-        return jsonify(get_available_voices())
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/tts/status', methods=['GET'])
-def get_tts_status_route():
-    """Get status of all TTS engines."""
-    try:
-        return jsonify(get_tts_status())
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/elevenlabs/set-key', methods=['POST'])
-def set_elevenlabs_key():
-    """Set ElevenLabs API key."""
-    try:
-        from pipeline.elevenlabs_tts import get_elevenlabs_tts
-        data = request.json
-        api_key = data.get('api_key', '').strip()
-        
-        if not api_key:
-            return jsonify({'error': 'API key is required'}), 400
-        
-        elevenlabs = get_elevenlabs_tts()
-        elevenlabs.set_api_key(api_key)
-        
-        # Test the API key
-        success, message = elevenlabs.test_api_key()
-        if success:
-            return jsonify({'success': True, 'message': message})
-        else:
-            return jsonify({'success': False, 'error': message}), 400
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/elevenlabs/voices', methods=['GET'])
-def get_elevenlabs_voices():
-    """Get ElevenLabs voices (requires API key to be set first)."""
-    try:
-        from pipeline.elevenlabs_tts import get_elevenlabs_tts
-        elevenlabs = get_elevenlabs_tts()
-        
-        if not elevenlabs.available:
-            return jsonify({'error': 'ElevenLabs API key not configured'}), 400
-        
-        voices = elevenlabs.get_voices(force_refresh=True)
-        return jsonify(voices)
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/elevenlabs/preview/<voice_id>', methods=['GET'])
-def get_elevenlabs_preview(voice_id):
-    """Get preview URL for an ElevenLabs voice."""
-    try:
-        from pipeline.elevenlabs_tts import get_elevenlabs_tts
-        elevenlabs = get_elevenlabs_tts()
-        
-        if not elevenlabs.available:
-            return jsonify({'error': 'ElevenLabs API key not configured'}), 400
-        
-        voices = elevenlabs.get_voices()
-        voice = next((v for v in voices if v['voice_id'] == voice_id), None)
-        
-        if voice and voice.get('preview_url'):
-            return jsonify({'preview_url': voice['preview_url']})
-        else:
-            return jsonify({'error': 'Preview not available for this voice'}), 404
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/tts/preview', methods=['POST'])
-def generate_voice_preview():
-    """Generate a preview audio sample for any TTS voice."""
-    try:
-        data = request.json
-        engine = data.get('engine', 'edge')
-        voice = data.get('voice')
-        text = data.get('text', 'Hello! This is a preview of how I sound.')
-        
-        print(f"[Preview] Request: engine={engine}, voice={voice}")
-        
-        if not voice:
-            return jsonify({'error': 'Voice ID is required'}), 400
-        
-        # For Kokoro, use pre-generated previews to avoid blocking
-        if engine == 'kokoro':
-            print(f"[Preview] Using pre-generated Kokoro preview...")
-            kokoro_preview_dir = os.path.join(config.PROJECTS_DIR, '_previews', 'kokoro')
-            kokoro_preview_path = os.path.join(kokoro_preview_dir, f"{voice}.mp3")
-            
-            if os.path.exists(kokoro_preview_path):
-                # Return pre-generated preview
-                return jsonify({
-                    'success': True,
-                    'preview_url': f'/api/preview-audio/kokoro/{voice}.mp3'
-                })
-            else:
-                print(f"[Preview] Pre-generated preview not found: {kokoro_preview_path}")
-                return jsonify({'error': 'Preview not available for this Kokoro voice. Please regenerate previews.'}), 404
-        
-        # For Edge TTS, generate on-demand (it's async and doesn't block)
-        preview_dir = os.path.join(config.PROJECTS_DIR, '_previews')
-        os.makedirs(preview_dir, exist_ok=True)
-        
-        # Generate preview filename
-        import hashlib
-        voice_hash = hashlib.md5(f"{engine}_{voice}".encode()).hexdigest()[:8]
-        preview_path = os.path.join(preview_dir, f"preview_{voice_hash}.mp3")
-        
-        # Check if preview already exists
-        if os.path.exists(preview_path):
-            print(f"[Preview] Using cached preview: {preview_path}")
-            filename = os.path.basename(preview_path)
-            return jsonify({
-                'success': True,
-                'preview_url': f'/api/preview-audio/{filename}'
-            })
-        
-        # Generate preview audio (Edge TTS only at this point)
-        print(f"[Preview] Generating new Edge TTS preview...")
-        from pipeline.tts_engine import generate_speech
-        
-        try:
-            if engine == 'elevenlabs':
-                from pipeline.elevenlabs_tts import get_elevenlabs_tts
-                elevenlabs = get_elevenlabs_tts()
-                if not elevenlabs.available:
-                    return jsonify({'error': 'ElevenLabs API key not configured'}), 400
-                result = elevenlabs.generate_speech(text, preview_path, voice=voice)
-            else:  # edge
-                result = generate_speech(text, preview_path, voice=voice, engine='edge')
-                print(f"[Preview] Edge generation complete!")
-        except Exception as gen_error:
-            print(f"[Preview] Generation error: {gen_error}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({'error': f'Failed to generate preview: {str(gen_error)}'}), 500
-        
-        print(f"[Preview] Preview generated successfully at {result['audio_path']}")
-        filename = os.path.basename(result['audio_path'])
-        return jsonify({
-            'success': True,
-            'preview_url': f'/api/preview-audio/{filename}',
-            'duration': result.get('duration', 0)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ─── Ollama Models ───────────────────────────────────────────────
 @app.route('/api/ollama/models', methods=['GET'])
 def get_ollama_models():
-    return jsonify(narrator.check_ollama())
+    return jsonify(orchestrator.narrator.check_ollama())
 
 # ─── Asset Management ────────────────────────────────────────────
 @app.route('/api/assets/<asset_type>', methods=['GET'])

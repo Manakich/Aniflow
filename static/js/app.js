@@ -8,7 +8,7 @@ const socket = io({ transports: ['polling', 'websocket'] });
 
 // ─── Global State ────────────────────────────────────────
 const APP = {
-  mode: null,           // 'dialogue' | 'narrated'
+  mode: 'full_recap',   // Single-purpose Manhwa Recap Studio
   currentStep: 0,
   projectName: '',
   sourceFolder: '',
@@ -18,7 +18,6 @@ const APP = {
   steps: [],            // step definitions for current mode
   
   // User-selected batch mode (explicit toggle)
-  userBatchMode: false, // User's explicit choice: false = single, true = batch
   
   // Chapter navigation for batch processing
   manhwaName: '',       // e.g., "Sword-Devouring-Swordmaster"
@@ -28,30 +27,12 @@ const APP = {
 };
 
 // ─── Step Definitions ────────────────────────────────────
-const DIALOGUE_STEPS = [
-  { id: 'source',       label: 'Source',        title: 'Select Chapter Source',       subtitle: 'Choose the folder containing your manhwa chapter images' },
-  { id: 'stitch',       label: 'Stitch',        title: 'Stitch & Detect Panels',      subtitle: 'Stitch pages into strips and detect individual panels' },
-  { id: 'review',       label: 'Review',        title: 'Review Cropped Panels',       subtitle: 'Verify the detected and cropped panels look correct' },
-  { id: 'extract_text', label: 'Extract',       title: 'Extract Dialogue Text',       subtitle: 'Extract text from speech bubbles using AI vision' },
-  { id: 'review2',      label: 'Review Text',   title: 'Review Extracted Text',       subtitle: 'Verify the extracted text for each panel' },
-  { id: 'tts',          label: 'Audio',         title: 'Generate Audio',              subtitle: 'Convert extracted dialogue to speech' },
-  { id: 'video',        label: 'Video',         title: 'Generate Clips',              subtitle: 'Generate individual video clips for each panel' },
-  { id: 'review_clips', label: 'Review Clips',  title: 'Review Video Clips',          subtitle: 'Preview and download individual video clips' },
-  { id: 'sort_clips',   label: 'Sort Clips',    title: 'Sort & Organize Clips',       subtitle: 'Organize clips from multiple chapters into folders' },
-];
-
-const NARRATED_STEPS = [
-  { id: 'source',       label: 'Source',        title: 'Select Chapter Source',       subtitle: 'Choose the folder containing your manhwa chapter images' },
-  { id: 'cast',         label: 'Cast',          title: 'Character Cast (Optional)',   subtitle: 'Scan chapters, group faces and name characters for accurate narration' },
-  { id: 'stitch',       label: 'Stitch',        title: 'Stitch & Two-Stage Detection', subtitle: 'Stitch pages, crop bubble panels, then detect & crop clean art panels' },
-  { id: 'review',       label: 'Review',        title: 'Review Art Panels',           subtitle: 'Verify the detected art panels (without bubble text) look correct' },
-  { id: 'extract_text', label: 'Extract',       title: 'Extract Dialogue Text',       subtitle: 'Extract text from the bubble panels (mapped to art panels)' },
-  { id: 'narrate',      label: 'Narrate',       title: 'AI Narration',                subtitle: 'Generate flowing 3rd-person narration from the mapped panels' },
-  { id: 'review2',      label: 'Review Text',   title: 'Review Narration',            subtitle: 'Check each panel\'s narration — edit or re-narrate any panel individually' },
-  { id: 'tts',          label: 'Audio',         title: 'Generate Audio',              subtitle: 'Convert narration to speech' },
-  { id: 'video',        label: 'Video',         title: 'Generate Clips',              subtitle: 'Combine narration audio with the clean art panels' },
-  { id: 'review_clips', label: 'Review Clips',  title: 'Review Video Clips',          subtitle: 'Preview and download individual video clips' },
-  { id: 'sort_clips',   label: 'Sort Clips',    title: 'Sort & Organize Clips',       subtitle: 'Organize clips from multiple chapters into folders' },
+const FULL_RECAP_STEPS = [
+  { id: 'source', label: 'Ссылка', title: 'Ссылка на мангу или манхву', subtitle: 'Вставьте URL и выберите главу или диапазон глав' },
+  { id: 'prepare', label: 'Кадры', title: 'Подготовка изображений', subtitle: 'AniFlow автоматически использует штатное извлечение и готовые результаты Crop 2' },
+  { id: 'full_script', label: 'Сценарий', title: 'Оригинальный русский пересказ', subtitle: 'Создайте сценарий, отредактируйте его и сохраните' },
+  { id: 'full_video', label: 'Видео', title: 'Немое видео', subtitle: 'Кадры по порядку, длительность по количеству слов сценария' },
+  { id: 'full_package', label: 'YouTube', title: 'Оформление ролика', subtitle: 'Три превью, три названия, описание и закреплённый комментарий' },
 ];
 
 // ─── Init ────────────────────────────────────────────────
@@ -68,7 +49,6 @@ async function checkStatus() {
     const d = await r.json();
     setDot('dotOllama', d.ollama?.running);
     setDot('dotFFmpeg', d.ffmpeg);
-    setDot('dotTTS', d.tts?.edge_tts || false);
   } catch (e) { /* ignore */ }
 }
 
@@ -80,121 +60,11 @@ function setDot(id, ok) {
 // ─── Projects ────────────────────────────────────────────
 async function loadProjects() {
   try {
-    const r = await fetch('/api/projects');
-    const projects = await r.json();
+    const response = await fetch('/api/projects');
+    const projects = await response.json();
     renderProjects(projects);
-  } catch (e) { /* ignore */ }
-  // 🚀 Batch dashboard: manhwa folders with per-chapter progress
-  try {
-    const r = await fetch('/api/batch-projects');
-    const batchProjects = await r.json();
-    renderBatchDashboard(batchProjects);
-  } catch (e) { /* ignore */ }
-}
-
-const BATCH_STAGE_META = {
-  init:           { label: '—',        color: 'rgba(255,255,255,0.25)' },
-  loaded:         { label: 'DL',       color: '#60a5fa' },
-  stitched:       { label: 'ST',       color: '#818cf8' },
-  detected1:      { label: 'DET',      color: '#a78bfa' },
-  cropped1:       { label: 'CRP',      color: '#c084fc' },
-  stitched2:      { label: 'ST2',      color: '#d8b4fe' },
-  detected2:      { label: 'DET2',     color: '#e879f9' },
-  cropped2:       { label: 'CRP2',     color: '#f0abfc' },
-  text_extracted: { label: 'TXT',      color: '#f472b6' },
-  text_removed:   { label: 'CLN',      color: '#fb7185' },
-  narrated:       { label: 'NAR',      color: '#fda4af' },
-  audio_done:     { label: 'AUD',      color: '#fb923c' },
-  clips_done:     { label: 'DONE',     color: '#34d399' },
-  video_done:     { label: 'DONE',     color: '#34d399' },
-};
-
-function renderBatchDashboard(projects) {
-  const grid = document.getElementById('projectsGrid');
-  APP._batchProjects = projects || [];
-  if (!grid || !projects || projects.length === 0) return;
-
-  const cards = projects.map(p => {
-    const chips = p.chapters.map(c => {
-      const meta = BATCH_STAGE_META[c.stage] || BATCH_STAGE_META.init;
-      return `<span title="Chapter ${String(c.chapter).padStart(5, '0')} — ${c.stage} (${c.images} images)"
-                    style="display:inline-block; padding:2px 7px; margin:2px; border-radius:6px; font-size:10px; font-weight:700; color:#0b0d12; background:${meta.color}; opacity:${c.stage === 'init' ? 0.35 : 0.95};">${c.chapter}:${meta.label}</span>`;
-    }).join('');
-    const ready = p.chapters.filter(c => c.stage === 'clips_done' || c.stage === 'video_done').length;
-    const failed = p.chapters.filter(c => c.error);
-    return `
-    <div class="project-card" style="grid-column:1/-1; cursor:default;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
-        <div style="flex:1; min-width:260px;">
-          <div class="project-card-name" style="margin-bottom:4px;">📘 ${esc(p.display_name)}</div>
-          <div class="project-card-meta" style="margin-bottom:8px;">
-            ${p.total} chapter${p.total > 1 ? 's' : ''} · ${p.with_images} downloaded · ${ready} fully rendered
-            ${failed.length ? ` · <span style="color:var(--color-error); font-weight:600;">${failed.length} with errors</span>` : ''}
-          </div>
-          <div style="margin-bottom:10px;">${chips}</div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px;" onclick="openBatchProject('${esc(p.name)}')">📂 Open</button>
-            <button class="btn btn-primary" style="padding:6px 14px; font-size:12px;" onclick="runFullBatchForProject('${esc(p.name)}')">🚀 Run Full Batch</button>
-            <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px; color:var(--color-error); border-color:var(--color-error);" onclick="confirmDeleteProject('${esc(p.name)}')" title="Delete this project and all its files">🗑️ Delete</button>
-          </div>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-  grid.innerHTML = cards + (grid.querySelector('.empty-state') ? '' : grid.innerHTML);
-}
-
-async function openBatchProject(name) {
-  APP.mode = 'dialogue';
-  APP.steps = DIALOGUE_STEPS;
-  APP.projectName = name;
-  APP.projectData = null;
-  document.getElementById('viewHome').classList.add('hidden');
-  document.getElementById('viewWizard').classList.remove('hidden');
-  APP.currentStep = 1; // Stitch step — the pipeline hub
-  renderWizard();
-  await loadProjectData(name);
-}
-
-// ─── 🗑️ Project deletion (two-step confirm) ──────────────
-function confirmDeleteProject(name) {
-  if (APP.batchRunning) {
-    toast('Wait for the running batch to finish first', 'warning');
-    return;
-  }
-  const p = (APP._batchProjects || []).find(x => x.name === name);
-  const displayName = p ? p.display_name : name;
-  const total = p ? p.total : 0;
-  openModal('⚠️ Delete this project?', `
-    <p style="font-size:14px; margin-bottom:10px;">
-      Are you sure you want to permanently delete <strong>${esc(displayName)}</strong>?
-    </p>
-    <p style="font-size:13px; color:var(--text-secondary); line-height:1.6;">
-      This wipes <strong>everything</strong> related to it:
-      all ${total} chapter folder(s) of downloaded images, stitched strips,
-      detected panels, cropped panels, extracted text, audio and video clips.
-      <strong style="color:var(--color-error);">This cannot be undone.</strong>
-    </p>
-  `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-    <button class="btn btn-danger" style="font-weight:700;" onclick="deleteProjectConfirmed('${esc(name)}')">🗑️ Yes, delete everything</button>
-  `);
-}
-
-async function deleteProjectConfirmed(name) {
-  try {
-    const r = await fetch(`/api/batch-projects/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    const data = await r.json();
-    if (!r.ok) {
-      toast(`Delete failed: ${data.error}`, 'error');
-      return;
-    }
-    closeModal();
-    toast(`🗑️ "${name}" wiped from disk`, 'success');
-    if (APP.projectName === name) { APP.projectName = ''; APP.projectData = null; }
-    loadProjects(); // refresh the dashboard without the deleted card
-  } catch (e) {
-    toast('Delete failed: ' + e.message, 'error');
+  } catch (error) {
+    console.warn('Could not load recent projects:', error);
   }
 }
 
@@ -221,26 +91,26 @@ function renderProjects(projects) {
 }
 
 function resumeProject(name) {
-  // Load project and determine which mode it was using
+  // Resume at preparation: all existing extraction stages are cache-aware
+  // and will reuse Crop 2/OCR results rather than processing the pages twice.
   APP.projectName = name;
-  // Default to dialogue mode for resume
-  selectMode('dialogue');
-  APP.currentStep = 2; // jump to review
+  selectMode('full_recap');
+  APP.currentStep = 1;
   renderWizard();
   loadProjectData(name);
 }
 
 // ─── Mode Selection ──────────────────────────────────────
 function selectMode(mode) {
-  APP.mode = mode;
-  APP.steps = mode === 'dialogue' ? DIALOGUE_STEPS : NARRATED_STEPS;
+  // This fork is a single-purpose application: only Full Recap Studio is exposed.
+  APP.mode = 'full_recap';
+  APP.steps = FULL_RECAP_STEPS;
   APP.currentStep = 0;
   APP.projectName = '';
   APP.sourceFolder = '';
   APP.projectData = null;
-  // Persist the active pipeline mode so backend steps pick the right
-  // panel list + text field (narration vs dialogue) for this project
-  APP.settings.pipeline_mode = mode;
+  // Save the one active product workflow.
+  APP.settings.pipeline_mode = 'full_recap';
 
   document.getElementById('viewHome').classList.add('hidden');
   document.getElementById('viewWizard').classList.remove('hidden');
@@ -283,17 +153,10 @@ function renderStepContent() {
 
   const renderers = {
     'source': renderSourceStep,
-    'cast': renderCastStep,
-    'stitch': renderStitchStep,
-    'review': renderReviewStep,
-    'extract_text': renderExtractStep,
-    'review2': renderReview2Step,
-    'clean': renderCleanStep,
-    'narrate': renderNarrateStep,
-    'tts': renderTTSStep,
-    'video': renderVideoStep,
-    'review_clips': renderReviewClipsStep,
-    'sort_clips': renderSortClipsStep,
+    'prepare': renderFullRecapPrepareStep,
+    'full_script': renderFullRecapScriptStep,
+    'full_video': renderFullRecapVideoStep,
+    'full_package': renderFullRecapPackageStep,
   };
 
   const render = renderers[step.id];
@@ -323,271 +186,40 @@ const SCRAPER = {
 function renderSourceStep() {
   const body = document.getElementById('stepBody');
   body.innerHTML = `
-    <div id="chapterNavSlot">${renderChapterNavigation()}</div>
-    
-    <!-- Manhwa Downloader -->
-    <div class="settings-panel" style="margin-top:0; margin-bottom:18px;">
-      <div class="settings-panel-title">📥 Download Manhwa</div>
+    <div class="settings-panel" style="margin-top:0;">
+      <div class="settings-panel-title">📚 Ссылка на мангу или манхву</div>
       <div class="form-group">
-        <label class="form-label">Manhwa URL</label>
-        <div style="display:flex; gap:8px;">
+        <label class="form-label">URL страницы тайтла</label>
+        <div style="display:flex;gap:8px;">
           <input type="text" class="form-input" id="inputMangaUrl" style="flex:1"
-                 placeholder="https://manhuaus.com/manga/solo-leveling/" value="${esc(APP._lastUrl || '')}">
-          <button class="btn btn-secondary" onclick="analyzeUrl()" id="btnAnalyze">🔍 Analyze</button>
+                 placeholder="Вставьте ссылку на страницу манги/манхвы"
+                 value="${esc(APP._lastUrl || '')}">
+          <button class="btn btn-primary" onclick="analyzeUrl()" id="btnAnalyze">Найти главы</button>
         </div>
-        <div class="text-xs text-dim mt-1">Supports MangaDex, Manhuaus, Manhwatop, and similar sites</div>
+        <div class="text-xs text-dim mt-2">Приложение проверит доступные главы. После выбора диапазона оно скачает страницы и запустит штатную обработку AniFlow один раз.</div>
       </div>
-
-      <!-- Analyze results -->
       <div id="analyzeResult"></div>
     </div>
+    <input type="hidden" id="inputProjectName" value="${esc(APP.projectName || '')}">
+    <input type="hidden" id="inputSourceFolder" value="${esc(APP.sourceFolder || '')}">`;
 
-    <div class="divider" style="position:relative; text-align:center;">
-      <span style="background:var(--bg-card); padding:0 12px; position:relative; z-index:1; color:var(--text-dim); font-size:12px; font-weight:600;">Or use a local folder</span>
-    </div>
-
-    <div class="form-group" style="margin-top:16px;">
-      <label class="form-label">Project Name</label>
-      <input type="text" class="form-input" id="inputProjectName"
-             placeholder="e.g. Solo Leveling" value="${esc(APP.projectName)}">
-    </div>
-    
-    <!-- BATCH MODE TOGGLE -->
-    <div class="form-group" style="margin-top:20px; padding:16px; background:var(--blue-tint); border:2px solid var(--blue); border-radius:8px;">
-      <label class="form-label" style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
-        <span style="font-size:16px;">🔄</span>
-        <span style="font-weight:700;">Processing Mode</span>
-      </label>
-      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <label class="radio-option" style="flex:1; cursor:pointer; padding:12px; border-radius:6px;" onclick="setBatchMode(false)">
-          <input type="radio" name="batchMode" value="single" checked style="margin-right:8px;">
-          <div style="display:inline-block;">
-            <strong>📄 Single Chapter</strong>
-            <div style="font-size:11px; color:var(--text-dim); margin-top:2px;">Process one chapter at a time</div>
-          </div>
-        </label>
-        <label class="radio-option" style="flex:1; cursor:pointer; padding:12px; border-radius:6px;" onclick="setBatchMode(true)">
-          <input type="radio" name="batchMode" value="batch" style="margin-right:8px;">
-          <div style="display:inline-block;">
-            <strong>📚 Batch Mode</strong>
-            <div style="font-size:11px; color:var(--text-dim); margin-top:2px;">Process multiple chapters at once</div>
-          </div>
-        </label>
-      </div>
-      <div id="batchModeHint" style="margin-top:12px; padding:10px; background:var(--paper); border:1.5px solid var(--blue); border-radius:6px; font-size:12px; color:var(--ink); display:none;">
-        💡 <strong>Batch Mode:</strong> Download multiple chapters (e.g., 1-5) and process them all together. You'll be able to switch between chapters to review each one's results.
-      </div>
-    </div>
-    
-    <div class="form-group">
-      <label class="form-label">Chapter Folder Path</label>
-      <div style="display:flex; gap:8px;">
-        <input type="text" class="form-input" id="inputSourceFolder" style="flex:1"
-               placeholder="/path/to/chapter/images" value="${esc(APP.sourceFolder)}">
-        <button class="btn btn-secondary" onclick="browseFolderForSource()" style="white-space:nowrap;">
-          📁 Browse...
-        </button>
-      </div>
-      <div class="text-xs text-dim mt-1">Folder containing .jpg/.png images for this chapter</div>
-    </div>
-
-    <div class="settings-panel">
-      <div class="settings-panel-title">⚙️ Pipeline Settings</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">TTS Engine</label>
-          <select class="form-select" id="settingTTSEngine" onchange="onTTSEngineChange(this)">
-            <option value="edge" selected>Edge TTS (free)</option>
-            <option value="kokoro">Kokoro TTS (local)</option>
-            <option value="elevenlabs">ElevenLabs (premium)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">TTS Voice</label>
-          <select class="form-select" id="settingTTSVoice" onchange="localStorage.setItem('ttsVoice_' + document.getElementById('settingTTSEngine').value, this.value)">
-            <option value="">Loading voices…</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Video Resolution</label>
-          <select class="form-select" id="settingResolution">
-            <optgroup label="Landscape (16:9) - YouTube">
-              <option value="1080p_landscape" selected>1920x1080 (1080p Landscape)</option>
-              <option value="2k_landscape">2560x1440 (2K Landscape)</option>
-              <option value="4k_landscape">3840x2160 (4K Landscape)</option>
-            </optgroup>
-            <optgroup label="Portrait (9:16) - Shorts/Reels">
-              <option value="1080p">1080x1920 (1080p Portrait)</option>
-              <option value="2k">1440x2560 (2K Portrait)</option>
-              <option value="4k">2160x3840 (4K Portrait)</option>
-            </optgroup>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Video FPS</label>
-          <select class="form-select" id="settingFPS">
-            <option value="30">30 FPS</option>
-            <option value="60">60 FPS</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Animation Style</label>
-          <select class="form-select" id="settingAnimation">
-            <option value="auto" selected>Auto (varied)</option>
-            <option value="none">None (static)</option>
-            <option value="random">Random</option>
-            <option value="zoom_in">Zoom in</option>
-            <option value="zoom_out">Zoom out</option>
-            <option value="slide_left">Pan left</option>
-            <option value="slide_right">Pan right</option>
-            <option value="slide_up">Pan up</option>
-            <option value="slide_down">Pan down</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Background Mode</label>
-          <select class="form-select" id="settingBgMode" onchange="onBgModeChange(this)">
-            <option value="blur" selected>Blurred panel (auto-fill)</option>
-            <option value="color">Solid color</option>
-            <option value="blur_color">Blurred + color overlay</option>
-            <option value="custom">Custom image / video</option>
-          </select>
-        </div>
-        <div class="form-group" id="bgColorRow" style="display:none;">
-          <label class="form-label">Background Color & Opacity</label>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <input type="color" id="settingBgColor" value="#0a0a0f" style="width:44px; height:36px; border:none; background:none; cursor:pointer; padding:0;">
-            <input type="range" id="settingBgOpacity" min="0" max="100" value="50" style="flex:1; accent-color:var(--amber);" oninput="document.getElementById('bgOpacityVal').textContent = this.value + '%'">
-            <span id="bgOpacityVal" class="text-xs text-dim" style="width:40px;">50%</span>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Video Quality</label>
-          <select class="form-select" id="settingQuality">
-            <option value="low">Low (small file)</option>
-            <option value="medium" selected>Medium</option>
-            <option value="high">High (large file)</option>
-          </select>
-        </div>
-        <div class="form-group" id="bgCustomRow" style="display:none; grid-column: 1 / -1;">
-          <label class="form-label">Custom Background (image, or video — video needs Speed Mode)</label>
-          <div style="display:flex; gap:8px;">
-            <input class="form-select" id="settingCustomBg" placeholder="/path/to/background.jpg or .mp4">
-            <button class="btn btn-secondary" style="padding:8px 14px;" onclick="browseFileFor('settingCustomBg')">📁</button>
-          </div>
-          <div class="text-xs text-dim" style="margin-top:4px;">Video backgrounds loop under the panel (panel motion is static in this mode)</div>
-        </div>
-        <div class="form-group" style="grid-column: 1 / -1;">
-          <label class="form-label">Watermark (optional)</label>
-          <div style="display:flex; gap:8px;">
-            <input class="form-select" id="settingWatermark" placeholder="/path/to/logo.png (leave empty for none)">
-            <button class="btn btn-secondary" style="padding:8px 14px;" onclick="browseFileFor('settingWatermark')">📁</button>
-          </div>
-        </div>
-        <div class="form-group" style="grid-column: 1 / -1;">
-          <label class="form-label">⚡ Speed Mode</label>
-          <label style="display:flex; align-items:flex-start; gap:10px; padding:12px; background:var(--amber-tint); border:1px solid var(--amber); border-radius:6px; cursor:pointer;">
-            <input type="checkbox" id="settingSpeedMode" ${localStorage.getItem('speedMode') === 'true' ? 'checked' : ''} onchange="toggleSpeedOptions(this)" style="margin-top:2px; width:16px; height:16px; accent-color:var(--amber);">
-            <span style="font-size:12px; line-height:1.5; color:var(--ink-soft);">
-              <strong style="color:var(--amber);">Faster rendering</strong> — hardware video encoder, parallel clip generation, concurrent TTS for all engines, and faster AI narration. Turn <strong>OFF</strong> for the classic behavior. Output files are the same.
-            </span>
-          </label>
-          <div id="speedOptionsPanel" style="display:${localStorage.getItem('speedMode') === 'true' ? 'block' : 'none'}; margin-top:10px; padding:14px; background:var(--paper-tint); border:1px solid var(--amber); border-radius:6px;">
-            <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:10px;">⚙️ Speed settings for your hardware</div>
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
-              <select id="speedPresetSelect" class="form-select" style="max-width:260px;" onchange="applySpeedPreset(this.value)">
-                <option value="custom">Custom</option>
-                <option value="builtin:low">🖥️ Low-End PC</option>
-                <option value="builtin:balanced">⚖️ Balanced (recommended)</option>
-                <option value="builtin:high">🚀 High-End PC</option>
-              </select>
-              <input id="speedPresetName" class="form-select" style="max-width:150px;" placeholder="Preset name">
-              <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="saveSpeedPreset()">💾 Save</button>
-              <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="deleteSpeedPreset()" title="Delete selected custom preset">🗑️</button>
-              <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="resetSpeedDefaults()" title="Back to balanced defaults">↺ Reset</button>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px 16px;">
-              <div>
-                <label class="form-label" style="font-size:12px;">Clip workers (parallel encodes)</label>
-                <input type="number" id="speedClipWorkers" class="form-select" min="1" max="16" value="4">
-                <div class="text-xs text-dim" style="margin-top:2px;">More = faster, uses more CPU/RAM. Low-end: 2 · High-end: 6+</div>
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">Video encoder</label>
-                <select id="speedEncoder" class="form-select">
-                  <option value="auto" selected>Auto (best available)</option>
-                  <option value="videotoolbox">Hardware (Apple VideoToolbox)</option>
-                  <option value="libx264">Software (libx264 fast)</option>
-                </select>
-                <div class="text-xs text-dim" id="speedEncoderHint" style="margin-top:2px;">Auto picks hardware when available</div>
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">Edge TTS parallel requests</label>
-                <input type="number" id="speedEdgeWorkers" class="form-select" min="1" max="12" value="6">
-                <div class="text-xs text-dim" style="margin-top:2px;">Free service — 4–8 is safe</div>
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">ElevenLabs parallel requests</label>
-                <input type="number" id="speedELWorkers" class="form-select" min="1" max="4" value="2">
-                <div class="text-xs text-dim" style="margin-top:2px;">Keep low — paid API rate limits</div>
-              </div>
-              <div style="grid-column: 1 / -1;">
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                  <input type="checkbox" id="speedKokoroGPU" checked style="width:15px; height:15px; accent-color:var(--amber);">
-                  <span style="font-size:12px; color:var(--ink-soft);">Kokoro TTS on GPU (Apple MPS) — falls back to CPU automatically</span>
-                </label>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>`;
-
-  const actions = document.getElementById('stepActions');
-  actions.innerHTML = `
-    <div></div>
-    <div class="step-actions-right">
-      <button class="btn" style="background:var(--amber); color:#fff; font-weight:700;" onclick="runFullBatchFromSource()" title="Load + run every step on ALL chapters automatically">🚀 Run Full Batch</button>
-      <button class="btn btn-primary" onclick="startSource()">Load Chapter</button>
-    </div>`;
-
-  // Re-render analyze results if we already have them
-  if (SCRAPER.mangaInfo) {
-    renderAnalyzeResult(SCRAPER.mangaInfo);
-  }
-
-  // Fill Speed Mode defaults from the actual hardware (once per session)
-  if (localStorage.getItem('speedMode') === 'true') {
-    initSpeedPanel();
-  }
-
-  // ✅ SYNC: restore engine/voice (remembered choice, or the open project's
-  // saved settings) and pre-fill every field from the saved project
-  const engineSel = document.getElementById('settingTTSEngine');
-  const pSettings = (APP.projectData && APP.projectData.settings) || null;
-  if (engineSel) {
-    engineSel.value = (pSettings && pSettings.tts_engine) || localStorage.getItem('ttsEngine') || 'edge';
-  }
-  refreshVoiceOptions(
-    engineSel ? engineSel.value : 'edge',
-    (pSettings && pSettings.tts_voice) || localStorage.getItem('ttsVoice_' + (engineSel ? engineSel.value : 'edge')));
-  if (pSettings) prefillSourceSettings(pSettings);
+  document.getElementById('stepActions').innerHTML = `
+    <div class="text-xs text-dim">После скачивания главы приложение продолжит обработку автоматически.</div>`;
+  if (SCRAPER.mangaInfo) renderAnalyzeResult(SCRAPER.mangaInfo);
 }
 
 async function analyzeUrl() {
   const url = document.getElementById('inputMangaUrl').value.trim();
-  if (!url) return toast('Please paste a manhwa URL', 'error');
+  if (!url) return toast('Вставьте ссылку на мангу или манхву', 'error');
 
   APP._lastUrl = url;
   SCRAPER.analyzing = true;
   const btn = document.getElementById('btnAnalyze');
   btn.disabled = true;
-  btn.innerHTML = '<div class="spinner"></div> Analyzing...';
+  btn.innerHTML = '<div class="spinner"></div> Анализирую…';
 
   const resultEl = document.getElementById('analyzeResult');
-  resultEl.innerHTML = `<div class="text-sm text-dim mt-1"><div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></div> Analyzing URL...</div>`;
+  resultEl.innerHTML = `<div class="text-sm text-dim mt-1"><div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></div> Проверяю ссылку и ищу доступные главы…</div>`;
 
   try {
     const r = await fetch('/api/scraper/analyze', {
@@ -606,12 +238,12 @@ async function analyzeUrl() {
       toast(`Found "${data.manga_name}" — ${data.total_chapters} chapters`, 'success');
     }
   } catch (e) {
-    resultEl.innerHTML = `<div class="text-sm" style="color:var(--color-error);margin-top:8px;">❌ Network error: ${esc(e.message)}</div>`;
-    toast('Analyze failed: ' + e.message, 'error');
+    resultEl.innerHTML = `<div class="text-sm" style="color:var(--color-error);margin-top:8px;">❌ Ошибка сети: ${esc(e.message)}</div>`;
+    toast('Анализировать failed: ' + e.message, 'error');
   } finally {
     SCRAPER.analyzing = false;
     btn.disabled = false;
-    btn.innerHTML = '🔍 Analyze';
+    btn.innerHTML = '🔍 Анализировать';
   }
 }
 
@@ -630,12 +262,12 @@ function renderAnalyzeResult(data) {
         <div style="flex:1;">
           <div style="font-size:20px; font-weight:800; font-family:var(--font-display); color:var(--ink); margin-bottom:6px;">📖 ${esc(data.manga_name)}</div>
           <div class="text-xs" style="color:var(--text-secondary); margin-bottom:8px; font-weight:500;">
-            <span>🌐 ${esc(data.site || 'Unknown Site')}</span>
+            <span>🌐 ${esc(data.site || 'Неизвестный сайт')}</span>
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-            <div class="badge badge-success" style="font-size:13px; font-weight:600;">✓ ${data.total_chapters} chapters available</div>
+            <div class="badge badge-success" style="font-size:13px; font-weight:600;">✓ доступно глав: ${data.total_chapters}</div>
             <div class="badge" style="background:var(--paper); border:1px solid var(--blue); color:var(--blue); font-size:13px;">
-              📊 Ch.${firstCh} → Ch.${lastCh}
+              📊 Главы ${firstCh} → ${lastCh}
             </div>
           </div>
         </div>
@@ -643,20 +275,20 @@ function renderAnalyzeResult(data) {
 
       <div style="margin-top:18px;">
         <div class="form-group" style="margin-bottom:10px;">
-          <label class="form-label" style="font-size:13px; font-weight:700; color:var(--ink);">📥 Select chapters to download</label>
+          <label class="form-label" style="font-size:13px; font-weight:700; color:var(--ink);">📥 Выберите главы для скачивания</label>
           <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" class="form-input" id="inputChapterRange" style="flex:1; font-weight:600;"
-                   placeholder="e.g. 23 or 23-67 or 1,5,10" value="${Math.round(firstCh)}">
+                   placeholder="Например: 23, 23-67 или 1,5,10" value="${Math.round(firstCh)}">
             <button class="btn btn-primary" onclick="downloadChapters()" id="btnDownload" style="font-weight:600; padding:10px 20px;">
-              📥 Download
+              📥 Скачать главы
             </button>
           </div>
           <div class="text-xs" style="color:var(--text-secondary); margin-top:6px; line-height:1.5;">
-            💡 <b>Single:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">23</code>
-            <b>Range:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">23-67</code>
-            <b>Multiple:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">1,5,10</code>
+            💡 <b>Одна глава:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">23</code>
+            <b>Диапазон:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">23-67</code>
+            <b>Несколько глав:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">1,5,10</code>
             <br>
-            <span style="color:var(--text-dim); font-size:11px;">For batch processing: download multiple chapters and process them all at once.</span>
+            <span style="color:var(--text-dim); font-size:11px;">Можно выбрать несколько глав — они будут объединены в один общий пересказ.</span>
           </div>
         </div>
       </div>
@@ -665,7 +297,7 @@ function renderAnalyzeResult(data) {
       <div class="progress-container hidden" id="downloadProgress">
         <div class="progress-bar-wrap"><div class="progress-bar-fill" id="downloadProgressBar"></div></div>
         <div class="progress-label">
-          <span id="downloadProgressMsg">Downloading...</span>
+          <span id="downloadProgressMsg">Скачиваю…</span>
           <span class="pct" id="downloadProgressPct">0%</span>
         </div>
       </div>
@@ -699,25 +331,25 @@ function parseChapterRange(rangeStr, allChapters) {
 }
 
 async function downloadChapters() {
-  if (!SCRAPER.mangaInfo) return toast('Analyze a URL first', 'error');
+  if (!SCRAPER.mangaInfo) return toast('Анализировать a URL first', 'error');
 
   const rangeStr = document.getElementById('inputChapterRange').value.trim();
-  if (!rangeStr) return toast('Enter a chapter number or range', 'error');
+  if (!rangeStr) return toast('Укажите номер главы или диапазон', 'error');
 
   const chapters = parseChapterRange(rangeStr, SCRAPER.mangaInfo.chapters);
-  if (chapters.length === 0) return toast('No matching chapters found in that range', 'error');
+  if (chapters.length === 0) return toast('В выбранном диапазоне главы не найдены', 'error');
 
   const url = document.getElementById('inputMangaUrl').value.trim();
   SCRAPER.downloading = true;
 
   const btn = document.getElementById('btnDownload');
   btn.disabled = true;
-  btn.innerHTML = '<div class="spinner"></div> Downloading...';
+  btn.innerHTML = '<div class="spinner"></div> Скачиваю…';
 
   const progressEl = document.getElementById('downloadProgress');
   progressEl.classList.remove('hidden');
 
-  toast(`Downloading ${chapters.length} chapter(s)...`, 'info');
+  toast(`Скачиваю глав: ${chapters.length}…`, 'info');
 
   try {
     const r = await fetch('/api/scraper/download', {
@@ -731,9 +363,9 @@ async function downloadChapters() {
     }
     // Download happens async via websocket — step_complete will fire
   } catch (e) {
-    toast('Download failed: ' + e.message, 'error');
+    toast('Ошибка скачивания: ' + e.message, 'error');
     btn.disabled = false;
-    btn.innerHTML = '📥 Download';
+    btn.innerHTML = '📥 Скачать главы';
     SCRAPER.downloading = false;
   }
 }
@@ -744,38 +376,38 @@ socket.on('step_complete', function _handleDownload(data) {
 
   SCRAPER.downloading = false;
   const btn = document.getElementById('btnDownload');
-  if (btn) { btn.disabled = false; btn.innerHTML = '📥 Download'; }
+  if (btn) { btn.disabled = false; btn.innerHTML = '📥 Скачать главы'; }
 
   if (data.error) {
-    toast('Download error: ' + data.error, 'error');
+    toast('Ошибка загрузки: ' + data.error, 'error');
     return;
   }
 
   const result = data.result;
   if (!result) return;
 
-  toast(`Downloaded ${result.downloaded?.length || 0} chapter(s) — ${result.total_images || 0} images!`, 'success');
+  toast(`Загружено глав: ${result.downloaded?.length || 0} · страниц: ${result.total_images || 0}`, 'success');
 
-  // Show results and auto-fill project name & path
+  // Показать результат и автоматически заполнить проект
   const downloaded = result.downloaded || [];
   const resultEl = document.getElementById('downloadResult');
-  const mangaName = (result.manga_name || 'Unknown');
+  const mangaName = (result.manga_name || 'Без названия');
   
   if (resultEl && downloaded.length > 0) {
     resultEl.innerHTML = `
       <div style="margin-top:16px; padding:16px; background:var(--green-tint); border:2px solid var(--green); border-radius:8px;">
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
-          <div class="badge badge-success" style="font-size:14px; font-weight:700; padding:6px 12px;">✓ Download complete</div>
+          <div class="badge badge-success" style="font-size:14px; font-weight:700; padding:6px 12px;">✓ Загрузка завершена</div>
           <div style="font-size:16px; font-weight:800; font-family:var(--font-display); color:var(--ink);">📚 ${esc(mangaName)}</div>
         </div>
         
         <div style="background:var(--paper); padding:12px; border-radius:6px; border:1px solid var(--green); margin-bottom:12px;">
           <div style="font-size:13px; font-weight:600; color:var(--ink); margin-bottom:8px;">
-            📊 Downloaded ${downloaded.length} chapter${downloaded.length > 1 ? 's' : ''} • ${result.total_images || 0} total images
+            📊 Глав: ${downloaded.length} · страниц: ${result.total_images || 0}
           </div>
           ${downloaded.map(d => `
             <div class="text-xs" style="color:var(--text-secondary); margin:4px 0; padding:4px 8px; background:var(--paper-tint); border-radius:4px; font-family:monospace;">
-              📖 Chapter ${String(d.chapter).padStart(5, '0')}: ${d.images} images
+              📖 Глава ${String(d.chapter).padStart(5, '0')}: ${d.images} изображений
               <br><span style="opacity:0.6; font-size:11px;">→ ${esc(d.path)}</span>
             </div>
           `).join('')}
@@ -783,49 +415,28 @@ socket.on('step_complete', function _handleDownload(data) {
         
         ${downloaded.length > 1 ? `
           <div style="padding:12px; background:var(--blue-tint); border:1px solid var(--blue); border-radius:6px; margin-bottom:12px;">
-            <div style="font-size:12px; font-weight:700; color:var(--blue); margin-bottom:4px;">🎯 Batch mode is on</div>
+            <div style="font-size:12px; font-weight:700; color:var(--blue); margin-bottom:4px;">📚 Выбрано несколько глав</div>
             <div style="font-size:11px; color:var(--ink-soft);">
-              You downloaded multiple chapters! Use chapter navigation (← →) to switch between them during processing.
+              Все выбранные главы будут включены в один общий пересказ и видеоряд.
             </div>
           </div>
         ` : ''}
       </div>`;
 
-    // Auto-fill project name and folder for the first downloaded chapter
-    const first = downloaded[0];
-    const chNum = String(first.chapter).padStart(3, '0');
-    // Project name is just the manhwa title (clean and simple!)
-    const autoProjectName = mangaName;
-
+    // Load from the manga root so AniFlow discovers every selected Chapter_XXXXX folder.
     const nameInput = document.getElementById('inputProjectName');
     const folderInput = document.getElementById('inputSourceFolder');
+    const mangaRoot = result.download_dir || downloaded[0].path.replace(/[\\/]+Chapter_\\d+$/, '');
 
-    // Always auto-fill when downloading — the whole point is to skip manual entry
-    if (nameInput) nameInput.value = autoProjectName;
-    if (folderInput) folderInput.value = first.path;
-
-    APP.projectName = autoProjectName;
-    APP.sourceFolder = first.path;
-
+    if (nameInput) nameInput.value = mangaName;
+    if (folderInput) folderInput.value = mangaRoot;
+    APP.projectName = mangaName;
+    APP.sourceFolder = mangaRoot;
     SCRAPER.downloadedPaths = downloaded;
 
-    // If multiple chapters were downloaded, show a chapter picker
-    if (downloaded.length > 1) {
-      resultEl.innerHTML += `
-        <div style="margin-top:12px;">
-          <label class="form-label" style="font-weight:700;">🔀 Switch starting chapter</label>
-          <select id="selectDownloadedChapter" class="form-select" onchange="selectDownloadedChapter(this)" style="font-weight:600;">
-            ${downloaded.map((d, i) => `
-              <option value="${i}" ${i === 0 ? 'selected' : ''}>
-                📖 Chapter ${String(d.chapter).padStart(5, '0')} (${d.images} images)
-              </option>
-            `).join('')}
-          </select>
-          <div class="text-xs" style="color:var(--text-dim); margin-top:6px;">
-            Select which chapter to process first. You can switch between chapters later using ← → navigation.
-          </div>
-        </div>`;
-    }
+    // Downloading the selected range is enough; original AniFlow handles every
+    // chapter in the root folder during its existing load/stitch/Crop 2 pipeline.
+    startSource();
   }
 });
 
@@ -836,7 +447,7 @@ function selectDownloadedChapter(sel) {
   if (!paths[idx]) return;
 
   const d = paths[idx];
-  const mangaName = SCRAPER.mangaInfo?.manga_name || 'Unknown';
+  const mangaName = SCRAPER.mangaInfo?.manga_name || 'Без названия';
   const chNum = String(d.chapter).padStart(3, '0');
   // Project name is just the manhwa title
   const autoName = mangaName;
@@ -868,74 +479,17 @@ async function browseFolderForSource() {
 }
 
 function collectSourceSettings() {
-  const opacityEl = document.getElementById('settingBgOpacity');
   return {
-    pipeline_mode: APP.mode || 'dialogue',
-    tts_engine: document.getElementById('settingTTSEngine').value,
-    tts_voice: document.getElementById('settingTTSVoice').value,
-    video_resolution: document.getElementById('settingResolution').value,
-    video_fps: parseInt(document.getElementById('settingFPS').value),
-    video_quality: document.getElementById('settingQuality') ? document.getElementById('settingQuality').value : 'medium',
-    animation_style: document.getElementById('settingAnimation') ? document.getElementById('settingAnimation').value : 'auto',
-    bg_mode: document.getElementById('settingBgMode') ? document.getElementById('settingBgMode').value : 'blur',
-    bg_color: document.getElementById('settingBgColor') ? document.getElementById('settingBgColor').value : '#0a0a0f',
-    color_opacity: opacityEl ? parseInt(opacityEl.value, 10) / 100 : 0.5,
-    custom_bg_path: document.getElementById('settingCustomBg') ? document.getElementById('settingCustomBg').value.trim() : '',
-    watermark_path: document.getElementById('settingWatermark') ? document.getElementById('settingWatermark').value.trim() : '',
-    fast_mode: !!(document.getElementById('settingSpeedMode') && document.getElementById('settingSpeedMode').checked),
-    ...getSpeedSettings(),
+    pipeline_mode: 'full_recap',
+    video_resolution: '1080p_landscape',
+    video_fps: 30,
+    video_quality: 'medium',
+    animation_style: 'auto',
+    full_recap_target_words: 5000,
   };
 }
 
-// ─── ⚡ Pipeline settings sync (voices ↔ engine, bg color, pre-fill) ──────
-let _allVoices = null;
-
-async function loadVoicesOnce() {
-  if (_allVoices) return _allVoices;
-  try {
-    const r = await fetch('/api/voices');
-    _allVoices = await r.json();
-  } catch (e) { _allVoices = []; }
-  return _allVoices;
-}
-
-function _prettyVoiceLabel(v) {
-  if (v.engine === 'edge') {
-    const pretty = (v.name || '').split('-').pop().replace('Neural', '').replace(/([a-z])([A-Z])/g, '$1 $2');
-    return pretty + (v.gender ? ` (${v.gender})` : '');
-  }
-  if (v.engine === 'kokoro' && v.style) return `${v.display_name || v.name} — ${v.style}`;
-  return v.display_name || v.name;
-}
-
-async function refreshVoiceOptions(engine, preferred) {
-  const sel = document.getElementById('settingTTSVoice');
-  if (!sel) return;
-  const voices = (await loadVoicesOnce()).filter(v => v.engine === engine);
-  if (voices.length === 0) {
-    sel.innerHTML = engine === 'elevenlabs'
-      ? '<option value="">⚠️ ElevenLabs: set your API key in settings first</option>'
-      : '<option value="">⚠️ No voices available for this engine</option>';
-    return;
-  }
-  sel.innerHTML = voices.map(v =>
-    `<option value="${esc(v.name)}">${esc(_prettyVoiceLabel(v))}</option>`).join('');
-  if (preferred && voices.some(v => v.name === preferred)) sel.value = preferred;
-  else {
-    const remembered = localStorage.getItem('ttsVoice_' + engine);
-    const fallbackDefault = engine === 'edge' ? 'en-US-ChristopherNeural' : null;
-    const fallbackOk = fallbackDefault && voices.some(v => v.name === fallbackDefault);
-    if (remembered && voices.some(v => v.name === remembered)) sel.value = remembered;
-    else if (fallbackOk) sel.value = fallbackDefault;
-    else sel.value = voices[0].name;
-  }
-}
-
-async function onTTSEngineChange(sel) {
-  localStorage.setItem('ttsEngine', sel.value);
-  await refreshVoiceOptions(sel.value, null);
-}
-
+// ─── Pipeline settings sync (video background and project defaults) ──────
 function onBgModeChange(sel) {
   const custom = document.getElementById('bgCustomRow');
   const color = document.getElementById('bgColorRow');
@@ -950,8 +504,6 @@ function prefillSourceSettings(s) {
     const el = document.getElementById(id);
     if (el && val !== undefined && val !== null && val !== '') el.value = val;
   };
-  if (s.tts_engine) set('settingTTSEngine', s.tts_engine);
-  refreshVoiceOptions(document.getElementById('settingTTSEngine').value, s.tts_voice);
   set('settingResolution', s.video_resolution);
   set('settingFPS', s.video_fps);
   set('settingAnimation', s.animation_style);
@@ -996,7 +548,7 @@ async function startSource() {
   const folder = document.getElementById('inputSourceFolder').value.trim();
 
   if (!name) return toast('Project name is required', 'error');
-  if (!folder) return toast('Folder path is required', 'error');
+  if (!folder) return toast('Source folder or archive file path is required', 'error');
 
   APP.projectName = name;
   APP.sourceFolder = folder;
@@ -1013,9 +565,9 @@ async function startSource() {
     });
     const d = await r.json();
     if (d.error) { toast(d.error, 'error'); setRunning(false); return; }
-    toast('Chapter loaded!', 'success');
+    toast('Главы загружены.', 'success');
   } catch (e) {
-    toast('Failed to load: ' + e.message, 'error');
+    toast('Не удалось загрузить главу: ' + e.message, 'error');
     setRunning(false);
   }
 }
@@ -1059,12 +611,12 @@ function renderStitchStep() {
 
     <div id="stitchBoxCount" class="text-xs text-dim mt-1"></div>`;
 
-  const isNarrated = APP.mode === 'narrated';
+  const isNarrated = APP.mode === 'narrated' || APP.mode === 'full_recap';
   const actions = document.getElementById('stepActions');
   actions.innerHTML = `
     <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
     <div class="step-actions-right">
-      <button class="btn" style="background:var(--amber); color:#fff; font-weight:700;" onclick="runFullBatchForProject(APP.projectName)" title="Run every remaining step on ALL chapters automatically">🚀 Run Full Batch</button>
+
       <button class="btn btn-secondary" onclick="runStitch()" id="btnStitch">Stitch Pages</button>
       <button class="btn btn-secondary" onclick="runDetect()" id="btnDetect" disabled>${isNarrated ? 'Detect 1 — Bubble Panels' : 'Detect Panels'}</button>
       <button class="btn btn-secondary" onclick="removeOverlappingBoxes()" id="btnRemoveOverlaps" style="display:none" title="Auto-fix overlapping boxes">🔧 Fix Overlaps</button>
@@ -1492,8 +1044,8 @@ function _batchStepsForMode() {
 
 function openWizardAtStep(projectName, stepId) {
   // Open the pipeline wizard on a specific step (used after full batch → Review Clips)
-  if (APP.mode !== 'dialogue' && APP.mode !== 'narrated') APP.mode = 'dialogue';
-  APP.steps = APP.mode === 'narrated' ? NARRATED_STEPS : DIALOGUE_STEPS;
+  APP.mode = 'full_recap';
+  APP.steps = FULL_RECAP_STEPS;
   APP.projectName = projectName;
   document.getElementById('viewHome').classList.add('hidden');
   document.getElementById('viewWizard').classList.remove('hidden');
@@ -1520,8 +1072,8 @@ async function _startFullBatch(payload) {
       return false;
     }
     APP.batchRunning = true;
-    if (!APP.mode) APP.mode = 'dialogue';
-    APP.steps = APP.mode === 'narrated' ? NARRATED_STEPS : DIALOGUE_STEPS;
+    APP.mode = 'full_recap';
+    APP.steps = FULL_RECAP_STEPS;
     APP.projectName = payload.project_name;
     showBatchOverlay(payload.project_name, payload.steps || _batchStepsForMode());
     // Jump to the stitch step so the user sees live context
@@ -1556,8 +1108,8 @@ async function runFullBatchFromSource() {
 async function runFullBatchForProject(projectName) {
   // Resume an existing project (dashboard / stitch step) with its saved settings
   APP.projectName = projectName;
-  APP.mode = APP.mode || 'dialogue';
-  APP.steps = APP.mode === 'narrated' ? NARRATED_STEPS : DIALOGUE_STEPS;
+  APP.mode = 'full_recap';
+  APP.steps = FULL_RECAP_STEPS;
   let settings = {};
   try {
     const r = await fetch(`/api/projects/${encodeURIComponent(projectName)}`);
@@ -1646,9 +1198,9 @@ function playDoneBeep() {
 
 
 const SPEED_BUILTINS = {
-  'builtin:low':      { clip_workers: 2, encoder: 'libx264',      edge_workers: 3, elevenlabs_workers: 1, kokoro_gpu: false },
-  'builtin:balanced': { clip_workers: 4, encoder: 'auto',         edge_workers: 6, elevenlabs_workers: 2, kokoro_gpu: true  },
-  'builtin:high':     { clip_workers: 8, encoder: 'videotoolbox', edge_workers: 8, elevenlabs_workers: 2, kokoro_gpu: true  },
+  'builtin:low':      { clip_workers: 2, encoder: 'libx264' },
+  'builtin:balanced': { clip_workers: 4, encoder: 'auto' },
+  'builtin:high':     { clip_workers: 8, encoder: 'videotoolbox' },
 };
 
 let _speedHardware = null; // cached /api/hardware response
@@ -1665,13 +1217,9 @@ function getSpeedSettings() {
     const v = parseInt(el.value, 10);
     return isNaN(v) ? dflt : Math.max(lo, Math.min(hi, v));
   };
-  const kEl = document.getElementById('speedKokoroGPU');
   return {
     clip_workers: num('speedClipWorkers', 1, 16, 4),
     encoder: (document.getElementById('speedEncoder') || {}).value || 'auto',
-    edge_workers: num('speedEdgeWorkers', 1, 12, 6),
-    elevenlabs_workers: num('speedELWorkers', 1, 4, 2),
-    kokoro_gpu: kEl ? kEl.checked : true,
   };
 }
 
@@ -1679,9 +1227,7 @@ function setSpeedSettings(s) {
   const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   setNum('speedClipWorkers', s.clip_workers);
   const enc = document.getElementById('speedEncoder'); if (enc) enc.value = s.encoder;
-  setNum('speedEdgeWorkers', s.edge_workers);
-  setNum('speedELWorkers', s.elevenlabs_workers);
-  const kEl = document.getElementById('speedKokoroGPU'); if (kEl) kEl.checked = !!s.kokoro_gpu;
+
 }
 
 function refreshSpeedPresetSelect(selected) {
@@ -1775,7 +1321,7 @@ function toggleSpeedOptions(cb) {
 function onSpeedModeToggle(cb) {
   // Remember the choice so it survives page reloads
   localStorage.setItem('speedMode', cb.checked ? 'true' : 'false');
-  toast(cb.checked ? '⚡ Speed Mode enabled — hardware encoder + parallel TTS/clips' : 'Speed Mode disabled — classic mode', 'info');
+  toast(cb.checked ? '⚡ Speed Mode enabled — hardware encoder + faster video processing' : 'Speed Mode disabled — classic mode', 'info');
 
   // If a project is already open, sync the setting into its saved state so
   // the next audio/video step picks it up immediately
@@ -1911,7 +1457,7 @@ async function loadPanelReview() {
   // Narrated mode reviews the CLEAN art panels (Crop 2); dialogue mode
   // reviews the bubble panels (Crop 1). Fall back if the preferred list
   // is empty so the step still shows something reviewable.
-  const preferred = APP.mode === 'narrated'
+  const preferred = (APP.mode === 'narrated' || APP.mode === 'full_recap')
     ? (panels.length ? panels : pwt)
     : (pwt.length ? pwt : panels);
   const panelList = preferred;
@@ -2165,101 +1711,6 @@ function closeCropModal() {
 }
 
 // ─── Step: Review 2 (Text Review) ───────────────────────────────
-function renderReview2Step() {
-  const isNarrated = APP.mode === 'narrated';
-  const body = document.getElementById('stepBody');
-  body.innerHTML = `
-    <div id="chapterNavSlot">${renderChapterNavigation()}</div>
-
-    ${isNarrated ? `
-    <p class="text-sm text-dim mb-1">
-      Review the narration for each art panel (the clean panels without bubble text).
-      Edit the text directly, or hit 🔁 Re-narrate to regenerate just that panel with AI.
-    </p>` : `
-    <p class="text-sm text-dim mb-1">
-      Review the dialogue extracted from each panel's speech bubbles.
-      This exact text becomes the panel's audio — edit anything the AI misread, then continue.
-    </p>`}
-    <div id="panelTextReviewList" style="margin-top: 20px;">
-      <div class="empty-state">
-        <div class="spinner spinner-lg" style="margin:0 auto 12px"></div>
-        <div class="empty-state-text">Loading ${isNarrated ? 'narration' : 'dialogue text'} review...</div>
-      </div>
-    </div>
-    <div id="panelTextCount" class="text-xs text-dim mt-1"></div>`;
-
-  const actions = document.getElementById('stepActions');
-  actions.innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
-    <div class="step-actions-right">
-      <button class="btn btn-primary" onclick="nextStep()">${isNarrated ? 'Narration Looks Good, Continue →' : 'Text Looks Good, Continue →'}</button>
-    </div>`;
-
-  loadNarrationReview();
-}
-window.renderReview2Step = renderReview2Step;
-
-async function loadNarrationReview() {
-  await loadProjectData(APP.projectName);
-  const isNarrated = APP.mode === 'narrated';
-  const container = document.getElementById('panelTextReviewList');
-
-  if (!isNarrated) {
-    await loadDialogueTextReview(container);
-    return;
-  }
-
-  // ✅ Narrated flow: art panels (Crop 2) carry the narration
-  const panels = APP.projectData?.panels || [];
-  const withNarration = panels.filter(p => p.narration || p.scene_narration);
-  const panelList = withNarration.length > 0 ? panels : [];
-
-  if (panelList.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">🎭</div>
-        <div class="empty-state-text">No narrations yet. Go back and run "Generate Narration" first.</div>
-      </div>`;
-    return;
-  }
-
-  container.innerHTML = `
-    <div style="display: flex; flex-direction: column; gap: 24px; max-height: 620px; overflow-y: auto; padding-right: 8px;">
-      ${panelList.map((p, i) => {
-        const pid = p.panel_id || (i + 1);
-        const filename = p.path ? p.path.split('/').pop() : `${String(pid).padStart(4, '0')}.jpg`;
-        const imgUrl = `/api/panel-image/${encodeURIComponent(APP.projectName)}/${filename}`;
-        const narration = p.narration || p.scene_narration || '';
-        return `
-          <div style="border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--bg-card); display: flex; flex-wrap: wrap; gap: 20px; align-items: start;">
-            <div style="flex: 0 0 180px; max-width: 180px;">
-              <div style="background: rgba(0,0,0,0.7); color: white; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-bottom: 12px; text-align: center;">
-                Panel #${pid}
-              </div>
-              <img src="${imgUrl}" alt="Panel ${pid}"
-                   style="width: 100%; height: auto; display: block; border-radius: 8px; border: 2px solid var(--border);"
-                   onerror="this.style.display='none'">
-              ${p.text ? `<div style="margin-top:8px; font-size:11px; color:var(--text-dim); max-height:90px; overflow-y:auto;"><strong>Dialogue:</strong><br>${esc(p.text)}</div>` : ''}
-            </div>
-            <div style="flex: 1 1 320px; min-width: 280px;">
-              <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
-                🎭 Narration
-              </div>
-              <textarea id="narr_edit_${pid}" rows="4"
-                style="width:100%; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 14px; font-size: 14px; line-height: 1.6; color: var(--text-primary); resize: vertical; font-family: inherit;">${esc(narration)}</textarea>
-              <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-                <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px;" onclick="savePanelNarration(${pid})">💾 Save Text</button>
-                <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px;" onclick="renarratePanel(${pid})" id="btnRenarr_${pid}">🔁 Re-narrate this panel</button>
-                <span id="narr_status_${pid}" class="text-xs text-dim" style="align-self:center;"></span>
-              </div>
-            </div>
-          </div>`;
-      }).join('')}
-    </div>`;
-  document.getElementById('panelTextCount').textContent = `${panelList.length} narrated panel(s)`;
-}
-
-// ─── Dialogue mode: review the EXTRACTED dialogue per bubble panel ──────
 async function loadDialogueTextReview(container) {
   const pwt = APP.projectData?.panels_with_text || [];
 
@@ -2304,7 +1755,7 @@ async function loadDialogueTextReview(container) {
           </div>`;
       }).join('')}
     </div>`;
-  document.getElementById('panelTextCount').textContent = `${pwt.length} panel(s) with extracted dialogue — this text becomes each panel's audio`;
+  document.getElementById('panelTextCount').textContent = `${pwt.length} панелей с текстовым контекстом для сценария`;
 }
 
 async function savePanelDialogue(panelId) {
@@ -2322,50 +1773,6 @@ async function savePanelDialogue(panelId) {
   } catch (e) {
     if (status) status.textContent = '✗ save failed';
     toast('Save failed: ' + e.message, 'error');
-  }
-}
-
-async function savePanelNarration(panelId) {
-  const text = (document.getElementById(`narr_edit_${panelId}`) || {}).value ?? '';
-  const status = document.getElementById(`narr_status_${panelId}`);
-  try {
-    const r = await fetch(`/api/panels/${encodeURIComponent(APP.projectName)}/${panelId}/narration`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ narration: text }),
-    });
-    if (!r.ok) throw new Error((await r.json()).error || r.status);
-    if (status) status.textContent = '✓ saved';
-    toast(`Panel #${panelId} narration saved`, 'success');
-  } catch (e) {
-    if (status) status.textContent = '✗ save failed';
-    toast('Save failed: ' + e.message, 'error');
-  }
-}
-
-async function renarratePanel(panelId) {
-  const status = document.getElementById(`narr_status_${panelId}`);
-  const btn = document.getElementById(`btnRenarr_${panelId}`);
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Re-narrating…'; }
-  if (status) status.textContent = 'AI is re-narrating this panel…';
-  try {
-    const r = await fetch(`/api/panels/${encodeURIComponent(APP.projectName)}/${panelId}/regenerate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || r.status);
-    if (!data.narration || data.narration.startsWith('[')) throw new Error(data.narration || 'model returned empty');
-    const ta = document.getElementById(`narr_edit_${panelId}`);
-    if (ta) ta.value = data.narration;
-    if (status) status.textContent = '✓ re-narrated';
-    toast(`Panel #${panelId} re-narrated`, 'success');
-  } catch (e) {
-    if (status) status.textContent = '✗ re-narrate failed';
-    toast('Re-narrate failed: ' + e.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔁 Re-narrate this panel'; }
   }
 }
 
@@ -3006,1118 +2413,464 @@ async function castBulkAdd() {
 window.castImportFromMAL = castImportFromMAL;
 window.castBulkAdd = castBulkAdd;
 
-function renderNarrateStep() {
-  const body = document.getElementById('stepBody');
+async function loadFullRecapData() {
+  if (!APP.projectName) return null;
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось загрузить данные Full Recap");
+    FULL_RECAP_DATA = data;
+    return data;
+  } catch (error) {
+    console.error("[FullRecap] Load failed:", error);
+    return null;
+  }
+}
+
+async function startFullRecapStep(step, settings = {}) {
+  if (isPipelineBusy()) return;
+  setRunning(true, "Full Recap: " + step);
+  try {
+    if (Object.keys(settings).length) {
+      await fetch(`/api/projects/${encodeURIComponent(APP.projectName)}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+    }
+    const response = await fetch(`/api/run/step/${step}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_name: APP.projectName, settings }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось запустить этап");
+    toast("Этап запущен. Прогресс отображается в приложении.", "info");
+  } catch (error) {
+    setRunning(false);
+    toast("Full Recap: " + error.message, "error");
+  }
+}
+
+function renderFullRecapPrepareStep() {
+  const body = document.getElementById("stepBody");
   body.innerHTML = `
-    <div id="chapterNavSlot">${renderChapterNavigation()}</div>
-
-    <p class="text-sm text-dim mb-2">
-      Choose how the AI writes your narration — run it locally (free, private, needs a decent PC)
-      or in the cloud with Gemini (fast, works on any PC). Both use your extracted dialogue,
-      panel images, chapter context and cast for a flowing story.
-    </p>
-
-    <div class="ai-backend-grid" id="aiBackendGrid">
-      <div class="ai-backend-card selected" onclick="selectAIBackend('ollama', this)">
-        <div class="icon">🦙</div>
-        <div class="name">Ollama (Local)</div>
-        <div class="desc">Free & offline — recommended if your PC can run it</div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">🖼️ Подготовка кадров и текстового контекста</div>
+      <p class="text-sm">Программа автоматически запустит штатные этапы AniFlow: извлечение чистых панелей Crop 2 и чтение текста из манги для точного пересказа.</p>
+      <p class="text-sm mt-2">Дополнительного вырезания поверх уже готовых кадров не будет. Если AniFlow ранее обработал главу, он использует сохранённые изображения и результаты распознавания.</p>
+      <div id="fullRecapPrepareSummary" class="text-xs text-dim mt-3">После подготовки здесь появится количество найденных кадров.</div>
+      <div class="progress-container hidden" id="fullRecapPrepareProgress">
+        <div class="progress-bar-wrap"><div class="progress-bar-fill" id="fullRecapPrepareProgressBar"></div></div>
+        <div class="progress-label"><span id="fullRecapPrepareProgressMsg">Подготовка…</span><span class="pct" id="fullRecapPrepareProgressPct">0%</span></div>
       </div>
-      <div class="ai-backend-card" onclick="selectAIBackend('gemini', this)">
-        <div class="icon">✨</div>
-        <div class="name">Gemini API (Multi-Key)</div>
-        <div class="desc">Cloud — paste several keys, auto-switches on quota</div>
-      </div>
-      <div class="ai-backend-card" onclick="selectAIBackend('claude', this)">
-        <div class="icon">🤖</div>
-        <div class="name">Claude API</div>
-        <div class="desc">Anthropic cloud (single key)</div>
-      </div>
-    </div>
-
-    <div id="aiBackendSettings"></div>
-
-    <div class="progress-container hidden" id="narrateProgress">
-      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="narrateProgressBar"></div></div>
-      <div class="progress-label">
-        <span id="narrateProgressMsg">Narrating...</span>
-        <span class="pct" id="narrateProgressPct">0%</span>
-      </div>
-    </div>
-
-    <div id="narratePreview" class="mt-2"></div>`;
-
-  APP.settings.ai_backend = 'ollama';
-  renderOllamaSettings();
-
-  const actions = document.getElementById('stepActions');
-  actions.innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
-    <div class="step-actions-right">
-      <button class="btn btn-secondary" onclick="runNarrate()" id="btnNarrate">🎭 (Re-)Generate Narration</button>
-      <button class="btn btn-primary" onclick="nextStep()" id="btnNarrateNext">Continue →</button>
     </div>`;
 
-  // Check existing narrations
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
+    <div class="step-actions-right">
+      <button class="btn btn-primary" onclick="runFullRecapPrepare()">Подготовить кадры и продолжить →</button>
+    </div>`;
+
   loadProjectData(APP.projectName).then(() => {
-    if (APP.projectData) {
-      const panels = APP.projectData.panels || [];
-      const hasNarr = panels.some(p => p.narration);
-      if (hasNarr) renderNarrationPreview(panels);
+    const panels = APP.projectData?.panels || [];
+    const summary = document.getElementById("fullRecapPrepareSummary");
+    if (summary && panels.length) {
+      summary.textContent = `В проекте уже есть ${panels.length.toLocaleString("ru-RU")} готовых кадров. Повторное вырезание не требуется.`;
     }
   });
 }
 
-function renderOllamaSettings() {
-  const savedModel = localStorage.getItem('ollamaNarrateModel') || 'gemma3:27b';
-  document.getElementById('aiBackendSettings').innerHTML = `
-    <div class="form-group">
-      <label class="form-label">Ollama Model (the writer)</label>
-      <select class="form-select" id="settingOllamaModel">
-        <option value="gemma3:27b">gemma3:27b (recommended — best narration quality, runs locally)</option>
-        <option value="qwen2.5vl:7b">qwen2.5vl:7b (vision — sees the panel + cast faces)</option>
-        <option value="qwen2.5:14b">qwen2.5:14b (text-only, lighter than 27b)</option>
-        <option value="qwen2.5vl:3b">qwen2.5vl:3b (fastest vision)</option>
-      </select>
-    </div>
-    <div class="text-xs text-dim">Runs 100% on your machine via Ollama. The vision parser (qwen2.5vl:3b) reads the panel, then the writer model drafts the recap line. Pull the writer first: <code>ollama pull gemma3:27b</code></div>`;
-  const sel = document.getElementById('settingOllamaModel');
-  if ([...sel.options].some(o => o.value === savedModel)) sel.value = savedModel;
+async function runFullRecapPrepare() {
+  await startFullRecapStep("full_recap_prepare");
 }
 
-function renderGeminiSettings() {
-  const savedKeys = localStorage.getItem('geminiApiKeys') || '';
-  const savedModel = localStorage.getItem('geminiNarrateModel') || 'gemini-2.5-flash';
-  document.getElementById('aiBackendSettings').innerHTML = `
-    <div class="form-group">
-      <label class="form-label">Gemini API Keys — one per line (auto-rotation on quota)</label>
-      <textarea class="form-input" id="settingGeminiKeys" rows="4" placeholder="AIzaSy...
-AIzaSy...
-AIzaSy..."
-        style="font-family:monospace; font-size:12px; resize:vertical;">${esc(savedKeys)}</textarea>
-      <div class="text-xs text-dim mt-1">
-        🔑 Paste as many keys as you have. They are used in order — when one hits its quota
-        the narrator <strong>instantly switches to the next</strong> and keeps going.
-        Free keys: <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--color-primary);">aistudio.google.com</a>
-      </div>
-    </div>
-    <div class="form-group" style="display:flex; gap:10px; align-items:end;">
-      <div style="flex:1;">
-        <label class="form-label">Model</label>
-        <select class="form-select" id="settingGeminiModel">
-          <option value="gemini-2.5-flash">Gemini 2.5 Flash (recommended)</option>
-          <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (fastest/cheapest)</option>
-          <option value="gemini-2.5-pro">Gemini 2.5 Pro (highest quality)</option>
-        </select>
-      </div>
-      <button class="btn btn-secondary" onclick="testGeminiKeys()" id="btnTestKeys" style="white-space:nowrap;">🔑 Test Keys</button>
-    </div>
-    <div id="geminiKeyStatus" class="text-xs" style="min-height:18px;"></div>
-    <div class="text-xs text-dim">Cloud narration sends the panel images + extracted dialogue to Google's API. Requires internet; metered by your key's quota.</div>`;
-  const modelSel = document.getElementById('settingGeminiModel');
-  if ([...modelSel.options].some(o => o.value === savedModel)) modelSel.value = savedModel;
-}
-
-function renderClaudeSettings() {
-  document.getElementById('aiBackendSettings').innerHTML = `
-    <div class="form-group">
-      <label class="form-label">Anthropic API Key</label>
-      <input type="password" class="form-input" id="settingClaudeKey" placeholder="Enter your Anthropic API key">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Model</label>
-      <select class="form-select" id="settingClaudeModel">
-        <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-        <option value="claude-opus-4-20250514">Claude Opus 4</option>
-      </select>
-    </div>`;
-}
-
-function selectAIBackend(backend, el) {
-  APP.settings.ai_backend = backend;
-  document.querySelectorAll('.ai-backend-card').forEach(c => c.classList.remove('selected'));
-  el.classList.add('selected');
-  if (backend === 'ollama') renderOllamaSettings();
-  else if (backend === 'gemini') renderGeminiSettings();
-  else renderClaudeSettings();
-}
-
-async function testGeminiKeys() {
-  const ta = document.getElementById('settingGeminiKeys');
-  const keys = (ta?.value || '').split(/[\n,]+/).map(k => k.trim()).filter(Boolean);
-  const statusEl = document.getElementById('geminiKeyStatus');
-  if (!keys.length) { toast('Paste at least one API key first', 'warning'); return; }
-  const btn = document.getElementById('btnTestKeys');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Testing…'; }
-  try {
-    const r = await fetch('/api/gemini/validate-keys', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keys }),
-    });
-    const data = await r.json();
-    const rows = (data.results || []).map(res => {
-      const icon = res.valid ? '✅' : '❌';
-      const cls = res.valid ? 'var(--color-success)' : 'var(--color-error)';
-      return `<div style="color:${cls}; margin:2px 0;">${icon} Key ${esc(res.key_masked)} — ${esc(res.reason)}</div>`;
-    }).join('');
-    const ok = (data.results || []).filter(r => r.valid).length;
-    if (statusEl) statusEl.innerHTML = `${rows}<div style="margin-top:4px;">${ok}/${data.results.length} key(s) usable</div>`;
-  } catch (e) {
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--color-error);">❌ Test failed: ' + esc(e.message) + '</span>';
-  } finally {
-    const btn = document.getElementById('btnTestKeys');
-    if (btn) { btn.disabled = false; btn.textContent = '🔑 Test Keys'; }
-  }
-}
-
-async function runNarrate() {
-  setRunning(true, 'Generating narration...');
-  showProgress('narrate');
-
-  const backend = APP.settings.ai_backend || 'ollama';
-  const payload = {
-    project_name: APP.projectName,
-    settings: { pipeline_mode: APP.mode || 'narrated' },
-  };
-
-  if (backend === 'ollama') {
-    const model = document.getElementById('settingOllamaModel')?.value;
-    if (model) {
-      payload.settings.ollama_model = model;
-      localStorage.setItem('ollamaNarrateModel', model);
-    }
-    payload.settings.narration_backend = 'ollama';
-    payload.settings.force_renarrate = true;
-  } else if (backend === 'gemini') {
-    const rawKeys = document.getElementById('settingGeminiKeys')?.value || '';
-    const keys = rawKeys.split(/[\n,]+/).map(k => k.trim()).filter(Boolean);
-    if (!keys.length) { toast('Paste at least one Gemini API key', 'error'); setRunning(false); return; }
-    const model = document.getElementById('settingGeminiModel')?.value || 'gemini-2.5-flash';
-    localStorage.setItem('geminiApiKeys', rawKeys.trim());
-    localStorage.setItem('geminiNarrateModel', model);
-    payload.settings.narration_backend = 'gemini';
-    payload.settings.force_renarrate = true;
-    payload.settings.gemini_api_keys = keys;
-    payload.settings.gemini_model = model;
-  } else {
-    // Claude (legacy single-key endpoint)
-    const key = document.getElementById('settingClaudeKey')?.value;
-    const model = document.getElementById('settingClaudeModel')?.value;
-    if (!key) { toast('API key is required', 'error'); setRunning(false); return; }
-    try {
-      await fetch('/api/narrate/claude', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_name: APP.projectName, api_key: key, model }),
-      });
-    } catch (e) { toast('Narration failed: ' + e.message, 'error'); setRunning(false); }
-    return;
-  }
-
-  // Ollama & Gemini both flow through the mapped narration step
-  try {
-    await fetch('/api/run/step/narrate_mapped', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) { toast('Narration failed: ' + e.message, 'error'); setRunning(false); }
-}
-
-
-function renderNarrationPreview(panels) {
-  const el = document.getElementById('narratePreview');
-  if (!el) return;
-  const items = panels.filter(p => p.narration).slice(0, 10);
-  if (items.length === 0) return;
-
-  el.innerHTML = `
-    <div class="settings-panel-title">🎭 Narration Preview</div>
-    <div class="narration-list">
-      ${items.map(p => {
-        const pid = p.panel_id || 0;
-        return `
-          <div class="narration-item">
-            <div class="narration-item-content">
-              <div class="narration-item-id">Panel ${pid}</div>
-              <div class="text-sm">${esc(p.narration.substring(0, 300))}</div>
-            </div>
-          </div>`;
-      }).join('')}
-    </div>`;
-}
-
-// ─── Step: TTS ──────────────────────────────────────────
-function renderTTSStep() {
-  const textField = APP.mode === 'dialogue' ? 'text' : 'narration';
-  body = document.getElementById('stepBody');
+function renderFullRecapScriptStep() {
+  const body = document.getElementById("stepBody");
   body.innerHTML = `
-    <div id="chapterNavSlot">${renderChapterNavigation()}</div>
-    
-    <p class="text-sm text-dim mb-2">
-      Convert ${APP.mode === 'dialogue' ? 'extracted dialogue' : 'narration'} text to speech audio.
-    </p>
-    
-    <!-- TTS Engine Selection -->
-    <div class="form-group">
-      <label class="form-label">TTS Engine</label>
-      <select class="form-select" id="ttsEngine" onchange="handleTTSEngineChange()">
-        <option value="edge">Edge TTS (Free, Cloud-based)</option>
-        <option value="kokoro">Kokoro TTS (Local, High Quality)</option>
-        <option value="elevenlabs">ElevenLabs (Premium, Best Quality)</option>
-      </select>
-    </div>
-
-    <!-- ElevenLabs API Key Section (hidden by default) -->
-    <div id="elevenLabsKeySection" class="hidden" style="margin-bottom: 16px; padding: 16px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border);">
-      <div class="form-group" style="margin-bottom: 12px;">
-        <label class="form-label">ElevenLabs API Key</label>
-        <div style="display: flex; gap: 8px;">
-          <input type="password" class="form-input" id="elevenLabsApiKey" placeholder="Enter your ElevenLabs API key" style="flex: 1;">
-          <button class="btn btn-secondary" onclick="saveElevenLabsKey()" style="white-space: nowrap;">Set Key</button>
-        </div>
-        <div class="text-xs text-dim" style="margin-top: 4px;">
-          Get your API key from <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" style="color: var(--color-primary);">elevenlabs.io</a>
-        </div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">🧠 Параметры пересказа</div>
+      <div class="form-group">
+        <label class="form-label">Модель для написания сценария</label>
+        <input class="form-input" id="fullRecapTextModel" value="qwen2.5:14b" placeholder="Ollama model или ID модели 9router">
       </div>
-      <div id="elevenLabsKeyStatus" class="text-sm" style="margin-top: 8px;"></div>
-    </div>
-
-    <!-- Voice Selection -->
-    <div class="form-group">
-      <label class="form-label">Voice</label>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <select class="form-select" id="ttsVoice" style="flex: 1;" onchange="updateVoicePreview()">
-          <option value="">Loading voices...</option>
+      <div class="form-group">
+        <label class="form-label">Целевой объём</label>
+        <select id="fullRecapTargetWords" class="form-select">
+          <option value="5000" selected>5 000 слов — около 1 часа</option>
+          <option value="7500">7 500 слов — около 1 часа 30 минут</option>
+          <option value="10000">10 000 слов — около 2 часов</option>
         </select>
-        <button class="btn btn-ghost" onclick="playVoicePreview()" id="btnPreview" disabled style="white-space: nowrap;">
-          🔊 Preview
-        </button>
+        <div class="text-xs text-dim mt-1">Фактическая длительность видео рассчитывается после генерации по числу слов: 0,72 секунды на слово.</div>
       </div>
-      <div id="voiceDescription" class="text-xs text-dim" style="margin-top: 4px;"></div>
-    </div>
-
-    <!-- Audio Preview Player (hidden by default) -->
-    <div id="audioPreviewPlayer" class="hidden" style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border);">
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">VOICE PREVIEW</div>
-        <audio id="previewAudio" controls style="flex: 1; height: 32px;"></audio>
+      <div class="form-group">
+        <label class="form-label">Контекст истории (необязательно)</label>
+        <textarea id="fullRecapStoryContext" class="form-input" rows="3" placeholder="Правильные имена, предыстория, термины или важные пояснения…"></textarea>
+      </div>
+      <div class="settings-panel" style="background:var(--bg-secondary);">
+        <strong>Стиль пересказа уже настроен</strong>
+        <p class="text-sm mt-1">Подробное сюжетное повествование от третьего лица, энергичная разговорная подача, дозированная ирония и объяснение системы, способностей и последствий. Диалоги пересказываются своими словами. События и мотивы не выдумываются.</p>
       </div>
     </div>
-
-    <!-- Advanced Settings (collapsible) -->
-    <details style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border);">
-      <summary style="cursor: pointer; font-weight: 600; user-select: none;">Advanced Settings</summary>
-      <div style="margin-top: 12px;">
-        <div class="form-row" id="edgeSettings">
-          <div class="form-group">
-            <label class="form-label">Speech Rate</label>
-            <select class="form-select" id="ttsRate">
-              <option value="-10%">-10% (Slower)</option>
-              <option value="-5%" selected>-5% (Slightly Slower)</option>
-              <option value="+0%">Normal</option>
-              <option value="+5%">+5% (Slightly Faster)</option>
-              <option value="+10%">+10% (Faster)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Pitch</label>
-            <select class="form-select" id="ttsPitch">
-              <option value="-5Hz">-5Hz (Lower)</option>
-              <option value="-2Hz" selected>-2Hz (Slightly Lower)</option>
-              <option value="+0Hz">Normal</option>
-              <option value="+2Hz">+2Hz (Slightly Higher)</option>
-              <option value="+5Hz">+5Hz (Higher)</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-group hidden" id="kokoroSettings">
-          <label class="form-label">Speed</label>
-          <input type="range" class="form-range" id="kokoroSpeed" min="0.5" max="2.0" step="0.1" value="1.0" oninput="document.getElementById('kokoroSpeedValue').textContent = this.value + 'x'">
-          <div class="text-xs text-dim">Speed: <span id="kokoroSpeedValue">1.0x</span></div>
-        </div>
-      </div>
-    </details>
-
-    <div class="progress-container hidden" id="ttsProgress">
-      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="ttsProgressBar"></div></div>
-      <div class="progress-label">
-        <span id="ttsProgressMsg">Generating audio...</span>
-        <span class="pct" id="ttsProgressPct">0%</span>
-      </div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">📜 Полный сценарий</div>
+      <textarea id="fullRecapScriptEditor" class="form-input" rows="20" placeholder="Сначала нажмите «Создать пересказ». После генерации здесь можно редактировать весь текст."></textarea>
+      <div id="fullRecapScriptMeta" class="text-xs text-dim mt-2">Сценарий ещё не создан.</div>
     </div>`;
 
-  const actions = document.getElementById('stepActions');
-  actions.innerHTML = `
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
+    <div class="step-actions-right">
+      <button class="btn btn-secondary" onclick="runFullRecapScript()">✍️ Создать пересказ</button>
+      <button class="btn btn-primary" onclick="saveFullRecapScriptAndContinue()">Сохранить и к видео →</button>
+    </div>`;
+
+  loadFullRecapData().then(data => {
+    if (!data) return;
+    const model = document.getElementById("fullRecapTextModel");
+    const words = document.getElementById("fullRecapTargetWords");
+    const context = document.getElementById("fullRecapStoryContext");
+    if (model && data.settings?.full_recap_text_model) model.value = data.settings.full_recap_text_model;
+    if (words && data.settings?.full_recap_target_words) words.value = String(data.settings.full_recap_target_words);
+    if (context && data.settings?.full_recap_story_context) context.value = data.settings.full_recap_story_context;
+    renderFullRecapScriptPreview();
+  });
+}
+
+function renderFullRecapScriptPreview() {
+  const el = document.getElementById("fullRecapScriptEditor");
+  if (!el) return;
+  const text = FULL_RECAP_DATA?.script || "";
+  // Do not replace text while the user is actively editing it.
+  if (document.activeElement !== el || !el.value.trim()) el.value = text;
+  const meta = document.getElementById("fullRecapScriptMeta");
+  if (meta) {
+    const words = Number(FULL_RECAP_DATA?.word_count || (text.match(/[A-Za-zА-Яа-яЁё0-9]+(?:[’'-][A-Za-zА-Яа-яЁё0-9]+)*/gu) || []).length);
+    const duration = Number(FULL_RECAP_DATA?.duration_seconds || words * 0.72);
+    meta.textContent = text
+      ? `${words.toLocaleString("ru-RU")} слов · расчётная длительность немого видео: ${formatRecapDuration(duration)}`
+      : "Сценарий ещё не создан.";
+  }
+}
+
+async function runFullRecapScript() {
+  const settings = {
+    pipeline_mode: "full_recap",
+    full_recap_text_model: document.getElementById("fullRecapTextModel")?.value.trim() || "qwen2.5:14b",
+    full_recap_target_words: parseInt(document.getElementById("fullRecapTargetWords")?.value || "5000", 10),
+    full_recap_story_context: document.getElementById("fullRecapStoryContext")?.value.trim() || "",
+  };
+  await startFullRecapStep("full_recap_script", settings);
+}
+
+
+async function saveFullRecapScript() {
+  const fullText = document.getElementById("fullRecapScriptEditor")?.value.trim() || "";
+  if (!fullText) {
+    toast("Сначала создайте или вставьте сценарий.", "error");
+    return false;
+  }
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/script`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ full_text: fullText }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось сохранить сценарий");
+    await loadFullRecapData();
+    const meta = document.getElementById("fullRecapScriptMeta");
+    if (meta) {
+      meta.textContent = `${Number(data.word_count || 0).toLocaleString("ru-RU")} слов · расчётная длительность немого видео: ${formatRecapDuration(data.duration_seconds || 0)}`;
+    }
+    toast("Сценарий сохранён. Длительность видео пересчитана.", "success");
+    return true;
+  } catch (error) {
+    toast("Ошибка сохранения: " + error.message, "error");
+    return false;
+  }
+}
+
+async function saveFullRecapScriptAndContinue() {
+  const saved = await saveFullRecapScript();
+  if (saved) nextStep();
+}
+
+function renderFullRecapVideoPreview() {
+  const el = document.getElementById("fullRecapVideoPreview");
+  if (!el || !FULL_RECAP_DATA?.video_path) return;
+  el.innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">✅ Готовое видео без звука</div>
+      <video controls preload="metadata" style="width:100%;max-height:520px;background:#000;border-radius:8px;" src="/api/full-recap/${encodeURIComponent(APP.projectName)}/video"></video>
+      <div class="text-sm mt-2">${Number(FULL_RECAP_DATA.word_count || 0).toLocaleString("ru-RU")} слов · ${formatRecapDuration(FULL_RECAP_DATA.duration_seconds || 0)} · ${Number(FULL_RECAP_DATA.panel_count || 0).toLocaleString("ru-RU")} кадров</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+        <a class="btn btn-primary" href="/api/full-recap/${encodeURIComponent(APP.projectName)}/video" download>Скачать MP4</a>
+        <a class="btn btn-secondary" href="/api/full-recap/${encodeURIComponent(APP.projectName)}/export" download>Скачать весь проект</a>
+      </div>
+    </div>`;
+}
+
+function renderFullRecapVideoStep() {
+  document.getElementById("stepBody").innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">⏱️ Расчёт длительности</div>
+      <div id="fullRecapDurationEstimate" class="text-lg">Загружаю сценарий…</div>
+      <div class="text-xs text-dim mt-1">Формула: количество слов × 0,72 секунды. Все вырезанные кадры будут объединены по порядку с плавным движением. Аудиодорожки в видео не будет.</div>
+      <a class="btn btn-secondary" style="display:inline-block;margin-top:12px;text-decoration:none;" href="/api/full-recap/${encodeURIComponent(APP.projectName)}/script/download" download>Скачать сценарий TXT</a>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Разрешение YouTube</label>
+        <select id="fullRecapResolution" class="form-select">
+          <option value="1080p_landscape" selected>1920 × 1080</option>
+          <option value="2k_landscape">2560 × 1440</option>
+          <option value="4k_landscape">3840 × 2160</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Качество</label>
+        <select id="fullRecapQuality" class="form-select">
+          <option value="medium" selected>Обычное</option>
+          <option value="high">Высокое</option>
+        </select>
+      </div>
+    </div>
+    <div id="fullRecapVideoPreview" class="mt-2"></div>
+    <div class="progress-container hidden" id="fullVideoProgress">
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="fullVideoProgressBar"></div></div>
+      <div class="progress-label"><span id="fullVideoProgressMsg">Рендеринг немого видео…</span><span class="pct" id="fullVideoProgressPct">0%</span></div>
+    </div>`;
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
+    <div class="step-actions-right">
+      <button class="btn btn-primary" onclick="runFullRecapVideo()">🎬 Создать немое видео</button>
+      <button class="btn btn-secondary" onclick="nextStep()">К оформлению →</button>
+    </div>`;
+  loadFullRecapData().then(data => {
+    if (!data) return;
+    const estimate = document.getElementById("fullRecapDurationEstimate");
+    if (estimate) estimate.textContent = `${Number(data.word_count || 0).toLocaleString("ru-RU")} слов → ${formatRecapDuration(data.duration_seconds || 0)}`;
+    const settings = data.settings || {};
+    const resolution = document.getElementById("fullRecapResolution");
+    const quality = document.getElementById("fullRecapQuality");
+    if (resolution && settings.video_resolution) resolution.value = settings.video_resolution;
+    if (quality && settings.video_quality) quality.value = settings.video_quality;
+    if (data.video_path) renderFullRecapVideoPreview();
+  });
+}
+
+async function runFullRecapVideo() {
+  const settings = {
+    pipeline_mode: "full_recap",
+    video_resolution: document.getElementById("fullRecapResolution")?.value || "1080p_landscape",
+    video_quality: document.getElementById("fullRecapQuality")?.value || "medium",
+    video_fps: 30,
+    animation_style: "auto",
+  };
+  await startFullRecapStep("full_recap_video", settings);
+}
+
+let FULL_RECAP_PACKAGE_DATA = null;
+
+async function loadFullRecapPackageData() {
+  if (!APP.projectName) return null;
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/package`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось загрузить материалы оформления");
+    FULL_RECAP_PACKAGE_DATA = data;
+    return data;
+  } catch (error) {
+    console.error("[FullRecap] Package load failed:", error);
+    return null;
+  }
+}
+
+async function clearFullRecapReferences(kind) {
+  if (!confirm("Удалить все сохранённые референсы этого типа для текущего проекта?")) return;
+  try {
+    const response = await fetch(
+      `/api/full-recap/${encodeURIComponent(APP.projectName)}/references/${kind}`,
+      { method: "DELETE" }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось очистить референсы");
+    await loadFullRecapPackageData();
+    renderFullRecapPackagePreview();
+    toast(`Удалено референсов: ${data.removed || 0}`, "success");
+  } catch (error) {
+    toast("Ошибка очистки: " + error.message, "error");
+  }
+}
+
+async function uploadFullRecapReferences(kind, inputId) {
+  const input = document.getElementById(inputId);
+  const files = Array.from(input?.files || []);
+  if (!files.length) return toast("Сначала выберите изображения.", "warning");
+  const body = new FormData();
+  files.forEach(file => body.append("files", file));
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/references/${kind}`, {
+      method: "POST", body,
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Загрузка не удалась");
+    toast(`Загружено референсов: ${data.files?.length || 0}`, "success");
+    input.value = "";
+    await loadFullRecapPackageData();
+    renderFullRecapPackagePreview();
+  } catch (error) {
+    toast("Ошибка загрузки референсов: " + error.message, "error");
+  }
+}
+
+function renderFullRecapPackagePreview() {
+  const el = document.getElementById("fullRecapPackagePreview");
+  if (!el) return;
+  const data = FULL_RECAP_PACKAGE_DATA || {};
+  const titles = data.titles || [];
+  const thumbs = data.thumbnails || [];
+  const thumbnailRefs = data.thumbnail_references || [];
+  const titleRefs = data.title_references || [];
+  el.innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">📌 Референсы этого выпуска</div>
+      <div class="text-xs text-dim">Обложки: ${thumbnailRefs.length} · Названия: ${titleRefs.length}</div>
+      <div class="text-xs text-dim mt-1">${thumbnailRefs.map(esc).join(", ") || "Референсы обложек не загружены"}<br>${titleRefs.map(esc).join(", ") || "Референсы названий не загружены"}</div>
+    </div>
+    ${titles.length ? `
+      <div class="settings-panel">
+        <div class="settings-panel-title">✍️ Три варианта названия</div>
+        ${titles.map((item,index)=>`
+          <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:8px;margin:8px 0;cursor:pointer;">
+            <input type="radio" name="fullRecapSelectedTitle" value="${index}" ${data.selected_title?.title === item.title ? "checked" : ""} onchange="selectFullRecapTitle(${index})" style="margin-top:4px;">
+            <span style="flex:1;">
+              <strong>${esc(item.title)}</strong>
+              <span class="text-xs text-dim" style="display:block;margin-top:4px;">Надпись на обложке: ${esc(item.thumbnail_text || "")} · ${esc(item.angle || "")}</span>
+            </span>
+          </label>`).join("")}
+      </div>` : ""}
+    ${thumbs.length ? `
+      <div class="settings-panel">
+        <div class="settings-panel-title">🖼️ Три варианта обложки</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;">
+          ${thumbs.map((item,index)=>`
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+              <img src="/api/full-recap/${encodeURIComponent(APP.projectName)}/thumbnails/${encodeURIComponent(item.filename)}" alt="Обложка ${index+1}" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;">
+              <div style="padding:10px;">
+                <strong>Обложка ${index+1}</strong>
+                <div class="text-xs text-dim">${esc(item.title || "")}</div>
+                <a href="/api/full-recap/${encodeURIComponent(APP.projectName)}/thumbnails/${encodeURIComponent(item.filename)}" download style="font-size:12px;">Скачать JPG</a>
+              </div>
+            </div>`).join("")}
+        </div>
+      </div>` : ""}
+    ${data.description ? `
+      <div class="settings-panel">
+        <div class="settings-panel-title">📝 Описание видео</div>
+        <textarea id="fullRecapGeneratedDescription" class="form-input" rows="7" readonly>${esc(data.description)}</textarea>
+        <button class="btn btn-secondary mt-2" onclick="copyFullRecapPackageText('description')">Скопировать описание</button>
+      </div>` : ""}
+    ${data.pinned_comment ? `
+      <div class="settings-panel">
+        <div class="settings-panel-title">📌 Закреплённый комментарий</div>
+        <textarea id="fullRecapGeneratedPinnedComment" class="form-input" rows="4" readonly>${esc(data.pinned_comment)}</textarea>
+        <button class="btn btn-secondary mt-2" onclick="copyFullRecapPackageText('pinned_comment')">Скопировать комментарий</button>
+      </div>` : ""}
+    ${data.status && data.status !== "ready" ? `<div class="text-xs text-dim mt-2">Статус: ${esc(data.status)}</div>` : ""}
+  `;
+}
+
+async function copyFullRecapPackageText(kind) {
+  const value = kind === "description"
+    ? document.getElementById("fullRecapGeneratedDescription")?.value
+    : document.getElementById("fullRecapGeneratedPinnedComment")?.value;
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    toast("Текст скопирован.", "success");
+  } catch (error) {
+    toast("Не удалось скопировать. Выделите текст вручную.", "warning");
+  }
+}
+
+async function selectFullRecapTitle(index) {
+  try {
+    const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/package/selection`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось выбрать название");
+    await loadFullRecapPackageData();
+    toast("Название выбрано.", "success");
+  } catch (error) {
+    toast("Ошибка выбора названия: " + error.message, "error");
+  }
+}
+
+function renderFullRecapPackageStep() {
+  document.getElementById("stepBody").innerHTML = `
+    <p class="text-sm text-dim mb-3">Встроенный стиль уже настроен по предоставленным примерам успешных каналов. Ничего загружать не обязательно. При желании можно добавить референсы именно этого выпуска — они будут дополнительными ориентирами, а не обязательным условием.</p>
+    <div class="settings-panel">
+      <div class="settings-panel-title">🖼️ Референсы обложек</div>
+      <input id="fullRecapThumbnailRefs" type="file" accept="image/png,image/jpeg,image/webp" multiple class="form-input">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-secondary" onclick="uploadFullRecapReferences('thumbnails','fullRecapThumbnailRefs')">Загрузить референсы обложек</button>
+        <button class="btn btn-ghost" onclick="clearFullRecapReferences('thumbnails')">Очистить старые</button>
+      </div>
+      <div class="text-xs text-dim mt-1">Необязательно. До 16 PNG/JPG/WEBP; добавленные изображения уточняют стиль только этого выпуска.</div>
+    </div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">✍️ Референсы названий</div>
+      <input id="fullRecapTitleRefs" type="file" accept="image/png,image/jpeg,image/webp" multiple class="form-input">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-secondary" onclick="uploadFullRecapReferences('titles','fullRecapTitleRefs')">Загрузить скриншоты названий</button>
+        <button class="btn btn-ghost" onclick="clearFullRecapReferences('titles')">Очистить старые</button>
+      </div>
+      <label class="form-label mt-3">Примеры названий текстом</label>
+      <textarea id="fullRecapTitleReferenceText" class="form-input" rows="4" placeholder="Вставь сюда несколько названий, стиль которых нужно использовать как ориентир."></textarea>
+      <div class="text-xs text-dim mt-1">Необязательно. Встроенный профиль названий используется автоматически; текстовые примеры могут дополнить его для этого выпуска.</div>
+    </div>
+    <div class="settings-panel">
+      <div class="settings-panel-title">⚙️ Генерация превью</div>
+      <label class="form-label">Модель</label>
+      <select id="fullRecapImageModel" class="form-select">
+        <option value="gpt-image-2.5-sunburst" selected>GPT Image 2.5 Sunburst — точнее работает с референсами</option>
+        <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare — быстрый вариант</option>
+      </select>
+      <div class="text-xs text-dim mt-1">Для создания трёх превью нужен OPENAI_API_KEY в локальном файле .env. Ключ не отправляется в браузер и не сохраняется в GitHub.</div>
+    </div>
+    <div id="fullRecapPackagePreview" class="mt-2"></div>`;
+  document.getElementById("stepActions").innerHTML = `
     <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
     <div class="step-actions-right">
-      <button class="btn btn-secondary" onclick="runTTS()" id="btnTTS">🔊 Generate Audio</button>
-      <button class="btn btn-primary" onclick="nextStep()" id="btnTTSNext">Continue →</button>
+      <button class="btn btn-secondary" onclick="runFullRecapPackage()">✨ Сгенерировать 3 обложки и 3 названия</button>
+      <button class="btn btn-primary" onclick="goHome()">Готово</button>
     </div>`;
-
-  // Initialize: Load voices and set up engine
-  loadVoicesForEngine('edge');
+  loadFullRecapPackageData().then(data => {
+    if (!data) return;
+    const select = document.getElementById("fullRecapImageModel");
+    const text = document.getElementById("fullRecapTitleReferenceText");
+    if (select && data.settings?.openai_image_model) select.value = data.settings.openai_image_model;
+    if (text && data.settings?.full_recap_title_reference_text) text.value = data.settings.full_recap_title_reference_text;
+    renderFullRecapPackagePreview();
+  });
 }
 
-async function handleTTSEngineChange() {
-  const engine = document.getElementById('ttsEngine').value;
-  
-  // Show/hide ElevenLabs API key section
-  const keySection = document.getElementById('elevenLabsKeySection');
-  if (engine === 'elevenlabs') {
-    keySection.classList.remove('hidden');
-    // Check if API key is already set
-    checkElevenLabsKeyStatus();
-  } else {
-    keySection.classList.add('hidden');
-  }
-
-  // Show/hide advanced settings
-  const edgeSettings = document.getElementById('edgeSettings');
-  const kokoroSettings = document.getElementById('kokoroSettings');
-  if (engine === 'edge') {
-    edgeSettings.classList.remove('hidden');
-    kokoroSettings.classList.add('hidden');
-  } else if (engine === 'kokoro') {
-    edgeSettings.classList.add('hidden');
-    kokoroSettings.classList.remove('hidden');
-  } else {
-    edgeSettings.classList.add('hidden');
-    kokoroSettings.classList.add('hidden');
-  }
-
-  // Load voices for the selected engine
-  await loadVoicesForEngine(engine);
-}
-
-async function loadVoicesForEngine(engine) {
-  const voiceSelect = document.getElementById('ttsVoice');
-  const btnPreview = document.getElementById('btnPreview');
-  
-  voiceSelect.innerHTML = '<option value="">Loading voices...</option>';
-  voiceSelect.disabled = true;
-  btnPreview.disabled = true;
-
-  try {
-    let voices = [];
-    
-    if (engine === 'elevenlabs') {
-      // Check if API key is set
-      const response = await fetch('/api/elevenlabs/voices');
-      if (response.ok) {
-        voices = await response.json();
-      } else {
-        voiceSelect.innerHTML = '<option value="">Set API key first</option>';
-        return;
-      }
-    } else {
-      // Load all voices and filter by engine
-      const response = await fetch('/api/voices');
-      voices = await response.json();
-      voices = voices.filter(v => v.engine === engine);
-    }
-
-    if (voices.length === 0) {
-      voiceSelect.innerHTML = '<option value="">No voices available</option>';
-      return;
-    }
-
-    // Populate voice dropdown
-    voiceSelect.innerHTML = '';
-    voices.forEach(voice => {
-      const option = document.createElement('option');
-      if (engine === 'edge') {
-        option.value = voice.name;
-        option.textContent = `${voice.name.split('-').pop().replace('Neural', '')} (${voice.gender})`;
-      } else if (engine === 'kokoro') {
-        option.value = voice.name;
-        option.textContent = `${voice.display_name} (${voice.style})`;
-      } else if (engine === 'elevenlabs') {
-        option.value = voice.voice_id;
-        option.textContent = voice.name;
-        option.setAttribute('data-preview', voice.preview_url || '');
-        option.setAttribute('data-description', voice.description || '');
-      }
-      voiceSelect.appendChild(option);
-    });
-
-    voiceSelect.disabled = false;
-    btnPreview.disabled = false;
-    updateVoicePreview();
-
-  } catch (error) {
-    console.error('Error loading voices:', error);
-    voiceSelect.innerHTML = '<option value="">Error loading voices</option>';
-  }
-}
-
-function updateVoicePreview() {
-  const voiceSelect = document.getElementById('ttsVoice');
-  const selectedOption = voiceSelect.options[voiceSelect.selectedIndex];
-  const descDiv = document.getElementById('voiceDescription');
-  const engine = document.getElementById('ttsEngine').value;
-
-  if (engine === 'elevenlabs') {
-    const desc = selectedOption?.getAttribute('data-description');
-    descDiv.textContent = desc || '';
-  } else {
-    descDiv.textContent = '';
-  }
-}
-
-async function playVoicePreview() {
-  const engine = document.getElementById('ttsEngine').value;
-  const voice = document.getElementById('ttsVoice').value;
-  const btnPreview = document.getElementById('btnPreview');
-  
-  if (!voice) {
-    toast('Please select a voice first', 'warning');
-    return;
-  }
-
-  btnPreview.disabled = true;
-  btnPreview.textContent = '⏳ Loading...';
-
-  try {
-    let previewUrl = null;
-
-    if (engine === 'elevenlabs') {
-      // ElevenLabs voices have preview URLs
-      const selectedOption = document.getElementById('ttsVoice').options[document.getElementById('ttsVoice').selectedIndex];
-      previewUrl = selectedOption.getAttribute('data-preview');
-      
-      if (!previewUrl) {
-        toast('Preview not available for this voice', 'warning');
-        return;
-      }
-    } else {
-      // Generate preview for Edge/Kokoro
-      console.log('Requesting preview:', { engine, voice });
-      
-      // Add timeout to prevent infinite loading
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
-      
-      const response = await fetch('/api/tts/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          engine, 
-          voice,
-          text: 'Hello! This is a preview of how I sound. I will be narrating your manhwa recap.'
-        }),
-        signal: controller.signal
-      }).finally(() => clearTimeout(timeoutId));
-
-      console.log('Preview response status:', response.status);
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Preview error:', errorData);
-        throw new Error(errorData.error || 'Preview generation failed');
-      }
-
-      const data = await response.json();
-      console.log('Preview data:', data);
-      
-      if (!data.success || !data.preview_url) {
-        throw new Error('Invalid preview response');
-      }
-      
-      previewUrl = data.preview_url;
-    }
-
-    // Show audio player and play
-    const playerDiv = document.getElementById('audioPreviewPlayer');
-    const audio = document.getElementById('previewAudio');
-    audio.src = previewUrl;
-    playerDiv.classList.remove('hidden');
-    audio.play();
-
-    toast('Playing voice preview...', 'success');
-
-  } catch (error) {
-    console.error('Preview error:', error);
-    
-    // Handle abort/timeout
-    if (error.name === 'AbortError') {
-      toast('Preview generation timed out. Please try again.', 'error');
-    } else {
-      const errorMsg = error.message || 'Failed to load preview';
-      console.error('Error message:', errorMsg);
-      
-      if (errorMsg.includes('not installed') || errorMsg.includes('Install with')) {
-        toast('Kokoro TTS not installed locally. Please check the setup guide.', 'warning');
-      } else {
-        toast(`Failed to load preview: ${errorMsg}`, 'error');
-      }
-    }
-  } finally {
-    btnPreview.disabled = false;
-    btnPreview.textContent = '🔊 Preview';
-  }
-}
-
-async function saveElevenLabsKey() {
-  const apiKey = document.getElementById('elevenLabsApiKey').value.trim();
-  const statusDiv = document.getElementById('elevenLabsKeyStatus');
-  
-  if (!apiKey) {
-    statusDiv.innerHTML = '<span style="color: var(--color-error);">⚠️ Please enter an API key</span>';
-    return;
-  }
-
-  statusDiv.innerHTML = '<span style="color: var(--text-dim);">⏳ Validating API key...</span>';
-
-  try {
-    const response = await fetch('/api/elevenlabs/set-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ api_key: apiKey })
-    });
-
-    const data = await response.json();
-
-    if (data.success) {
-      statusDiv.innerHTML = '<span style="color: var(--color-success);">✓ ' + data.message + '</span>';
-      // Reload voices
-      await loadVoicesForEngine('elevenlabs');
-      toast('ElevenLabs API key saved successfully', 'success');
-    } else {
-      statusDiv.innerHTML = '<span style="color: var(--color-error);">⚠️ ' + data.error + '</span>';
-      toast('Invalid API key', 'error');
-    }
-  } catch (error) {
-    statusDiv.innerHTML = '<span style="color: var(--color-error);">⚠️ Error: ' + error.message + '</span>';
-  }
-}
-
-async function checkElevenLabsKeyStatus() {
-  const statusDiv = document.getElementById('elevenLabsKeyStatus');
-  try {
-    const response = await fetch('/api/tts/status');
-    const status = await response.json();
-    
-    if (status.elevenlabs_tts) {
-      statusDiv.innerHTML = '<span style="color: var(--color-success);">✓ API key is configured</span>';
-    } else {
-      statusDiv.innerHTML = '<span style="color: var(--text-dim);">ℹ️ API key required</span>';
-    }
-  } catch (error) {
-    statusDiv.innerHTML = '';
-  }
-}
-
-async function runTTS() {
-  setRunning(true, 'Generating audio...');
-  showProgress('tts');
-
-  // Update settings with current TTS choices
-  const engine = document.getElementById('ttsEngine')?.value || 'edge';
+async function runFullRecapPackage() {
+  const titleText = document.getElementById("fullRecapTitleReferenceText")?.value.trim() || "";
   const settings = {
-    pipeline_mode: APP.mode || 'dialogue',
-    tts_engine: engine,
-    tts_voice: document.getElementById('ttsVoice')?.value || 'en-US-ChristopherNeural',
+    pipeline_mode: "full_recap",
+    full_recap_title_reference_text: titleText,
+    openai_image_model: document.getElementById("fullRecapImageModel")?.value || "gpt-image-2.5-sunburst",
   };
-
-  // Add engine-specific settings
-  if (engine === 'edge') {
-    settings.tts_rate = document.getElementById('ttsRate')?.value || '-5%';
-    settings.tts_pitch = document.getElementById('ttsPitch')?.value || '-2Hz';
-  } else if (engine === 'kokoro') {
-    settings.tts_speed = parseFloat(document.getElementById('kokoroSpeed')?.value || '1.0');
-  }
-
-  // Save settings first
-  try {
-    await fetch(`/api/projects/${encodeURIComponent(APP.projectName)}/settings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-  } catch(e) { /* ignore */ }
-
-  try {
-    await fetch('/api/run/step/audio', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_name: APP.projectName, settings }),
-    });
-  } catch (e) { toast('Audio generation failed: ' + e.message, 'error'); setRunning(false); }
+  await startFullRecapStep("full_recap_package", settings);
 }
 
 // ─── Step: Video ────────────────────────────────────────
-function renderVideoStep() {
-  const body = document.getElementById('stepBody');
-  body.innerHTML = `
-    <div id="chapterNavSlot">${renderChapterNavigation()}</div>
-    
-    <p class="text-sm text-dim mb-2">
-      Generate individual video clips for each panel with synchronized audio.
-    </p>
-    
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Resolution</label>
-        <select class="form-select" id="videoRes">
-          <optgroup label="Portrait (9:16) - Shorts/Reels">
-            <option value="1080p">1080x1920 (1080p Portrait)</option>
-            <option value="2k">1440x2560 (2K Portrait)</option>
-            <option value="4k">2160x3840 (4K Portrait)</option>
-          </optgroup>
-          <optgroup label="Landscape (16:9) - YouTube">
-            <option value="1080p_landscape">1920x1080 (1080p Landscape)</option>
-            <option value="2k_landscape">2560x1440 (2K Landscape)</option>
-            <option value="4k_landscape">3840x2160 (4K Landscape)</option>
-          </optgroup>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Background Mode</label>
-        <select class="form-select" id="videoBg" onchange="handleBgModeChange()">
-          <option value="blur">Blur (Auto blurred edges)</option>
-          <option value="color">Solid Color</option>
-          <option value="blur_color">Blur + Color Overlay</option>
-          <option value="custom">Custom Background Image</option>
-          <option value="custom_video">Custom Background Video</option>
-        </select>
-      </div>
-    </div>
-    
-    <!-- Animation Controls -->
-    <div style="margin-top: 16px; padding: 16px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border);">
-      <div class="form-group">
-        <label class="form-label" style="display: flex; align-items: center; gap: 8px;">
-          <input type="checkbox" id="enableAnimations" checked onchange="handleAnimationToggle()" style="width: 18px; height: 18px; cursor: pointer;">
-          <span>Enable Panel Animations</span>
-        </label>
-        <div class="text-xs text-dim" style="margin-left: 26px;">Add dynamic camera movements to make clips more engaging</div>
-      </div>
-      
-      <div id="animationOptions" style="margin-top: 12px;">
-        <div class="form-group">
-          <label class="form-label">Animation Style</label>
-          <select class="form-select" id="animationStyle">
-            <option value="random">🎲 Random Mix (Varies each clip)</option>
-            <option value="zoom_in">🔍 Zoom In (Ken Burns)</option>
-            <option value="zoom_out">🔍 Zoom Out</option>
-            <option value="slide_left">← Slide from Right</option>
-            <option value="slide_right">→ Slide from Left</option>
-            <option value="slide_up">↑ Slide from Bottom</option>
-            <option value="slide_down">↓ Slide from Top</option>
-            <option value="none">⭕ None (Static)</option>
-          </select>
-          <div class="text-xs text-dim" style="margin-top: 4px;">
-            <strong>Random Mix</strong> will apply different animations to each clip for variety
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Color Picker (hidden by default) -->
-    <div id="colorPickerSection" class="hidden" style="margin-top: 12px; padding: 16px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border);">
-      <div class="form-group">
-        <label class="form-label">Background Color</label>
-        <div style="display: flex; gap: 12px; align-items: center;">
-          <input type="color" id="bgColor" value="#000000" class="form-input" style="width: 80px; height: 40px; padding: 4px; cursor: pointer;">
-          <input type="text" id="bgColorHex" value="#000000" class="form-input" style="flex: 1; font-family: monospace;" oninput="document.getElementById('bgColor').value = this.value">
-        </div>
-      </div>
-    </div>
-    
-    <!-- Blur Opacity Slider (for blur+color mode) -->
-    <div id="blurOpacitySection" class="hidden" style="margin-top: 12px; padding: 16px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border);">
-      <div class="form-group">
-        <label class="form-label">Color Overlay Opacity</label>
-        <input type="range" class="form-range" id="colorOpacity" min="0" max="100" value="50" oninput="document.getElementById('opacityValue').textContent = this.value + '%'">
-        <div class="text-xs text-dim">Opacity: <span id="opacityValue">50%</span></div>
-      </div>
-    </div>
-    
-    <!-- Custom Background Upload -->
-    <div id="customBgSection" class="hidden" style="margin-top: 12px; padding: 16px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border);">
-      <div class="form-group">
-        <label class="form-label">Upload Background Image</label>
-        <div style="position: relative;">
-          <input type="file" id="customBgFile" accept="image/*" style="display: none;" onchange="handleCustomBgUpload(this)">
-          <button type="button" class="btn btn-secondary" onclick="document.getElementById('customBgFile').click()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <span>📁</span>
-            <span id="bgFileName">Choose Image File</span>
-          </button>
-        </div>
-        <div class="text-xs text-dim" style="margin-top: 4px;">
-          Supported: JPG, PNG, WEBP. Image will be scaled to fit video resolution.
-        </div>
-      </div>
-      <div id="bgPreview" class="hidden" style="margin-top: 12px;">
-        <div class="text-xs text-dim" style="margin-bottom: 4px;">Preview:</div>
-        <img id="bgPreviewImg" style="max-width: 100%; max-height: 200px; border-radius: 8px; border: 2px solid var(--border);">
-      </div>
-    </div>
-    
-    <!-- Custom Background Video Upload -->
-    <div id="customBgVideoSection" class="hidden" style="margin-top: 12px; padding: 16px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border);">
-      <div class="form-group">
-        <label class="form-label">Upload Background Video</label>
-        <div style="position: relative;">
-          <input type="file" id="customBgVideoFile" accept="video/*" style="display: none;" onchange="handleCustomBgVideoUpload(this)">
-          <button type="button" class="btn btn-secondary" onclick="document.getElementById('customBgVideoFile').click()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <span>🎥</span>
-            <span id="bgVideoFileName">Choose Video File</span>
-          </button>
-        </div>
-        <div class="text-xs text-dim" style="margin-top: 4px;">
-          Supported: MP4, MOV, WEBM. Video will loop and be scaled to fit. Panel will overlay on top.
-        </div>
-      </div>
-      <div id="bgVideoPreview" class="hidden" style="margin-top: 12px;">
-        <div class="text-xs text-dim" style="margin-bottom: 4px;">Preview:</div>
-        <video id="bgVideoPreviewVid" controls style="max-width: 100%; max-height: 200px; border-radius: 8px; border: 2px solid var(--border);"></video>
-      </div>
-    </div>
-    
-    <div class="progress-container hidden" id="videoProgress">
-      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="videoProgressBar"></div></div>
-      <div class="progress-label">
-        <span id="videoProgressMsg">Generating individual clips...</span>
-        <span class="pct" id="videoProgressPct">0%</span>
-      </div>
-    </div>`;
-
-  const actions = document.getElementById('stepActions');
-  actions.innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
-    <div class="step-actions-right">
-      <button class="btn btn-primary" onclick="runVideo()" id="btnVideo">
-        🎬 Generate Clips
-      </button>
-    </div>`;
-  
-  // Sync color input with hex input
-  document.getElementById('bgColor').addEventListener('input', (e) => {
-    document.getElementById('bgColorHex').value = e.target.value;
-  });
-}
-
-function handleAnimationToggle() {
-  const enabled = document.getElementById('enableAnimations').checked;
-  const optionsDiv = document.getElementById('animationOptions');
-  const animationSelect = document.getElementById('animationStyle');
-  
-  if (enabled) {
-    optionsDiv.classList.remove('hidden');
-    optionsDiv.style.display = 'block';
-  } else {
-    optionsDiv.classList.add('hidden');
-    optionsDiv.style.display = 'none';
-    // Set to none when disabled
-    animationSelect.value = 'none';
-  }
-}
-
-function handleBgModeChange() {
-  const mode = document.getElementById('videoBg').value;
-  const colorSection = document.getElementById('colorPickerSection');
-  const blurOpacitySection = document.getElementById('blurOpacitySection');
-  const customBgSection = document.getElementById('customBgSection');
-  const customBgVideoSection = document.getElementById('customBgVideoSection');
-  
-  // Hide all sections
-  colorSection.classList.add('hidden');
-  blurOpacitySection.classList.add('hidden');
-  customBgSection.classList.add('hidden');
-  customBgVideoSection.classList.add('hidden');
-  
-  // Show relevant sections
-  if (mode === 'color') {
-    colorSection.classList.remove('hidden');
-  } else if (mode === 'blur_color') {
-    colorSection.classList.remove('hidden');
-    blurOpacitySection.classList.remove('hidden');
-  } else if (mode === 'custom') {
-    customBgSection.classList.remove('hidden');
-  } else if (mode === 'custom_video') {
-    customBgVideoSection.classList.remove('hidden');
-  }
-}
-
-async function handleCustomBgUpload(input) {
-  if (!input.files || !input.files[0]) return;
-  
-  const file = input.files[0];
-  
-  // Update button text
-  document.getElementById('bgFileName').textContent = file.name;
-  
-  const formData = new FormData();
-  formData.append('file', file);
-  
-  try {
-    const response = await fetch('/api/assets/backgrounds/upload', {
-      method: 'POST',
-      body: formData
-    });
-    
-    if (!response.ok) throw new Error('Upload failed');
-    
-    const data = await response.json();
-    
-    // Show preview
-    const preview = document.getElementById('bgPreview');
-    const previewImg = document.getElementById('bgPreviewImg');
-    previewImg.src = URL.createObjectURL(file);
-    preview.classList.remove('hidden');
-    
-    // Store filename for video generation
-    input.setAttribute('data-filename', data.filename);
-    
-    toast('Background uploaded successfully', 'success');
-  } catch (error) {
-    toast('Failed to upload background: ' + error.message, 'error');
-  }
-}
-
-async function handleCustomBgVideoUpload(input) {
-  if (!input.files || !input.files[0]) return;
-  
-  const file = input.files[0];
-  
-  // Update button text
-  document.getElementById('bgVideoFileName').textContent = file.name;
-  
-  const formData = new FormData();
-  formData.append('file', file);
-  
-  try {
-    const response = await fetch('/api/assets/backgrounds/upload', {
-      method: 'POST',
-      body: formData
-    });
-    
-    if (!response.ok) throw new Error('Upload failed');
-    
-    const data = await response.json();
-    
-    // Show preview
-    const preview = document.getElementById('bgVideoPreview');
-    const previewVid = document.getElementById('bgVideoPreviewVid');
-    previewVid.src = URL.createObjectURL(file);
-    preview.classList.remove('hidden');
-    
-    // Store filename for video generation
-    input.setAttribute('data-filename', data.filename);
-    
-    toast('Background video uploaded successfully', 'success');
-  } catch (error) {
-    toast('Failed to upload background video: ' + error.message, 'error');
-  }
-}
-
-async function runVideo() {
-  setRunning(true, 'Generating individual clips...');
-  showProgress('video');
-
-  const bgMode = document.getElementById('videoBg')?.value || 'blur';
-  const enableAnimations = document.getElementById('enableAnimations')?.checked !== false;
-  const animationStyle = enableAnimations ? (document.getElementById('animationStyle')?.value || 'random') : 'none';
-  
-  const settings = {
-    pipeline_mode: APP.mode || 'dialogue',
-    video_resolution: document.getElementById('videoRes')?.value || '1080p',
-    bg_mode: bgMode,
-    animation_style: animationStyle,
-  };
-  
-  // Add background-specific settings
-  if (bgMode === 'color' || bgMode === 'blur_color') {
-    settings.bg_color = document.getElementById('bgColor')?.value || '#000000';
-  }
-  if (bgMode === 'blur_color') {
-    settings.color_opacity = parseFloat(document.getElementById('colorOpacity')?.value || '50') / 100;
-  }
-  if (bgMode === 'custom') {
-    const fileInput = document.getElementById('customBgFile');
-    const filename = fileInput.getAttribute('data-filename');
-    if (filename) {
-      settings.custom_bg_path = filename;
-    } else {
-      toast('Please upload a background image first', 'warning');
-      setRunning(false);
-      return;
-    }
-  }
-
-  try {
-    await fetch('/api/run/step/video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_name: APP.projectName, settings }),
-    });
-  } catch (e) { toast('Video compose failed: ' + e.message, 'error'); setRunning(false); }
-}
-
-function downloadVideo() {
-  window.open(`/api/download/${encodeURIComponent(APP.projectName)}`, '_blank');
-}
-
-// ─── Step: Review Clips ─────────────────────────────────────
-function renderReviewClipsStep() {
-  const body = document.getElementById('stepBody');
-  body.innerHTML = `
-    <div id="chapterNavSlot">${renderChapterNavigation()}</div>
-    
-    <p class="text-sm text-dim mb-2">
-      Preview and download individual video clips for each panel.
-    </p>
-    <div id="clipsContainer" class="mt-3">
-      <div class="text-center text-dim">Loading clips...</div>
-    </div>`;
-
-  const actions = document.getElementById('stepActions');
-  actions.innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Back</button>
-    <div class="step-actions-right">
-      <button class="btn btn-primary" onclick="nextStep()">✓ Done</button>
-    </div>`;
-  
-  loadVideoClips();
-}
-
-async function loadVideoClips() {
-  const container = document.getElementById('clipsContainer');
-  
-  try {
-    const response = await fetch(`/api/clips/${encodeURIComponent(APP.projectName)}`);
-    const data = await response.json();
-    
-    if (!data.clips || data.clips.length === 0) {
-      container.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon">🎬</div>
-          <div class="empty-state-text">No clips generated yet. Go back and generate clips first.</div>
-        </div>`;
-      return;
-    }
-    
-    container.innerHTML = `
-      <div class="clips-stats" style="padding: 16px; background: var(--bg-secondary); border-radius: 8px; margin-bottom: 16px; display: flex; gap: 24px; align-items: center;">
-        <div>
-          <div class="text-xs text-dim">Total Clips</div>
-          <div class="text-xl" style="font-weight: 600;">${data.total}</div>
-        </div>
-        <div>
-          <div class="text-xs text-dim">Total Duration</div>
-          <div class="text-xl" style="font-weight: 600;">${formatDuration(data.clips.reduce((sum, c) => sum + (c.duration || 0), 0))}</div>
-        </div>
-        <div style="margin-left: auto;">
-          <button class="btn btn-secondary" onclick="downloadAllClips()">
-            📦 Download All Clips
-          </button>
-        </div>
-      </div>
-      <div class="clips-grid">
-        ${data.clips.map(clip => `
-          <div class="clip-card" style="background: var(--bg-secondary); border-radius: 12px; overflow: hidden; border: 1px solid var(--border);">
-            <div class="clip-video" style="position: relative; aspect-ratio: 16/9; background: #000;">
-              <video 
-                controls 
-                preload="metadata"
-                style="width: 100%; height: 100%; object-fit: contain;"
-                src="${clip.url}">
-              </video>
-            </div>
-            <div class="clip-info" style="padding: 12px;">
-              <div class="clip-title" style="font-weight: 600; margin-bottom: 4px;">
-                Scene ${String(clip.panel_id).padStart(4, '0')}
-              </div>
-              <div class="clip-text text-xs text-dim" style="margin-bottom: 8px; max-height: 60px; overflow: hidden; text-overflow: ellipsis;">
-                ${clip.text ? escapeHtml(clip.text) : '<em style="opacity:0.5;">no narration for this clip</em>'}
-              </div>
-              <div class="clip-meta" style="display: flex; justify-content: space-between; align-items: center;">
-                <span class="text-xs text-dim">${clip.duration ? formatDuration(clip.duration) : 'N/A'}</span>
-                <a 
-                  href="${clip.url}" 
-                  download="${clip.clip_filename}"
-                  class="btn btn-sm btn-ghost"
-                  style="padding: 4px 12px; font-size: 12px;">
-                  ⬇ Download
-                </a>
-              </div>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `;
-    
-  } catch (error) {
-    container.innerHTML = `
-      <div class="error-state">
-        <div class="error-icon">⚠️</div>
-        <div class="error-text">Failed to load clips: ${error.message}</div>
-      </div>`;
-  }
-}
-
-function formatDuration(seconds) {
-  if (seconds < 60) {
-    return `${seconds.toFixed(1)}s`;
-  }
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}m ${secs}s`;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function downloadAllClips() {
-  toast('Downloading all clips...', 'info');
-  // In a real implementation, this would create a ZIP file
-  // For now, just open each clip in a new tab
-  const clips = document.querySelectorAll('.clip-card video');
-  clips.forEach((video, index) => {
-    setTimeout(() => {
-      const link = document.createElement('a');
-      link.href = video.src;
-      link.download = `scene_${String(index + 1).padStart(4, '0')}.mp4`;
-      link.click();
-    }, index * 500); // Stagger downloads to avoid browser blocking
-  });
-}
-
-
-// ─── Batch Mode Toggle ──────────────────────────────────
-function setBatchMode(isBatch) {
-  APP.userBatchMode = isBatch;
-  
-  // Show/hide batch mode hint
-  const hint = document.getElementById('batchModeHint');
-  if (hint) {
-    hint.style.display = isBatch ? 'block' : 'none';
-  }
-  
-  // Update radio button styling
-  const labels = document.querySelectorAll('.radio-option');
-  labels.forEach(label => {
-    const radio = label.querySelector('input[type="radio"]');
-    if (radio) {
-      if (radio.checked) {
-        label.style.borderColor = 'var(--blue)';
-        label.style.background = 'var(--blue-tint)';
-      } else {
-        label.style.borderColor = '#9BA0A8';
-        label.style.background = 'var(--paper)';
-      }
-    }
-  });
-  
-  console.log('[Batch Mode] User selected:', isBatch ? 'BATCH' : 'SINGLE');
-}
-
-// ─── Navigation ─────────────────────────────────────────
 function nextStep() {
   if (APP.currentStep < APP.steps.length - 1) {
     APP.currentStep++;
@@ -4204,6 +2957,19 @@ socket.on('step_complete', (data) => {
   // Reload project data
   loadProjectData(APP.projectName);
 
+  if (String(data.step || '').startsWith('full_recap_')) {
+    loadFullRecapData().then(() => {
+      if (data.step === 'full_recap_prepare') {
+        toast("Кадры и текстовый контекст готовы.", "success");
+        nextStep();
+      }
+      if (data.step === 'full_recap_script') renderFullRecapScriptPreview();
+      if (data.step === 'full_recap_video') renderFullRecapVideoPreview();
+      if (data.step === 'full_recap_package') loadFullRecapPackageData().then(() => renderFullRecapPackagePreview());
+    });
+    return;
+  }
+
   // Auto-advance or enable buttons based on step
   const step = data.step;
   if (step === 'load') {
@@ -4219,7 +2985,7 @@ socket.on('step_complete', (data) => {
     // Reload project data to get detection boxes, then refresh overlay
     loadProjectData(APP.projectName).then(() => { loadStitchedPreview(); });
   } else if (step === 'crop1' || step === 'crop') {
-    if (APP.mode === 'narrated') {
+    if (APP.mode === 'narrated' || APP.mode === 'full_recap') {
       enable('btnStitch2');
       toast('Bubble panels cropped! Now run Stitch 2 to combine them.', 'info');
     } else {
@@ -4327,7 +3093,7 @@ function updateProgress(data) {
   const msg = data.message || 'Processing...';
 
   // Try to find the active progress bar
-  const prefixes = ['download', 'stitch', 'extract', 'clean', 'narrate', 'tts', 'video'];
+  const prefixes = ['download', 'stitch', 'extract', 'fullRecap', 'fullVideo', 'fullRecapPrepare'];
   for (const p of prefixes) {
     const bar = document.getElementById(`${p}ProgressBar`);
     const msgEl = document.getElementById(`${p}ProgressMsg`);
