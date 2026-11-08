@@ -410,6 +410,36 @@ def select_full_recap_title(project_name):
     if selected < 0 or selected >= len(state.full_recap_titles):
         return jsonify({'error': 'Такого варианта названия нет'}), 400
     state.full_recap_selected_title = state.full_recap_titles[selected]
+    workspace = state.full_recap_workspace_dir or state.project_dir
+    package_dir = os.path.join(workspace, 'full_recap')
+    os.makedirs(package_dir, exist_ok=True)
+    package = {
+        'titles': state.full_recap_titles,
+        'selected_title': state.full_recap_selected_title,
+        'description': state.full_recap_description,
+        'pinned_comment': state.full_recap_pinned_comment,
+    }
+    with open(os.path.join(package_dir, 'youtube_package.json'), 'w', encoding='utf-8') as file:
+        json.dump(package, file, ensure_ascii=False, indent=2)
+
+    if state.full_recap_export_dir and os.path.isdir(state.full_recap_export_dir):
+        from pipeline.full_recap_renderer import add_youtube_package_to_export
+        thumb_root = os.path.join(package_dir, 'thumbnails')
+        thumbnails = [
+            {
+                **item,
+                'path': os.path.join(thumb_root, item.get('filename', '')),
+            }
+            for item in state.full_recap_thumbnails
+        ]
+        add_youtube_package_to_export(
+            state.full_recap_export_dir,
+            titles=state.full_recap_titles,
+            description=state.full_recap_description,
+            pinned_comment=state.full_recap_pinned_comment,
+            selected_title=state.full_recap_selected_title,
+            thumbnails=thumbnails,
+        )
     state.save()
     return jsonify({'status': 'selected', 'title': state.full_recap_selected_title})
 
@@ -469,6 +499,18 @@ def download_full_recap_export(project_name):
 
     download_name = f"{state.manhwa_name or project_name}_full_recap_export.zip"
     return send_file(archive_path, as_attachment=True, download_name=download_name)
+
+
+@app.route('/api/full-recap/<project_name>/script/download', methods=['GET'])
+def download_full_recap_script(project_name):
+    """Download the complete Russian script as a standalone UTF-8 text file."""
+    state = PipelineState.load(project_name)
+    workspace = state.full_recap_workspace_dir or state.project_dir
+    script_path = os.path.join(workspace, 'full_recap', 'script.txt')
+    if not os.path.isfile(script_path):
+        return jsonify({'error': 'Сначала создайте и сохраните сценарий'}), 404
+    filename = f"{state.manhwa_name or project_name}_script.txt"
+    return send_file(script_path, as_attachment=True, download_name=filename)
 
 
 @app.route('/api/full-recap/<project_name>/script', methods=['PUT'])
