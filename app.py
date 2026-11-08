@@ -977,29 +977,6 @@ def run_full_batch():
     return jsonify({'status': 'started', 'project': project_name})
 
 
-@app.route('/api/browse-source-file', methods=['POST'])
-def browse_source_file():
-    """Native picker for one chapter archive, PDF or image."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        path = filedialog.askopenfilename(
-            title='Select a manga chapter file',
-            filetypes=[
-                ('Comic files', '*.zip *.cbz *.pdf'),
-                ('Images', '*.jpg *.jpeg *.png *.webp *.bmp *.gif'),
-                ('All files', '*.*'),
-            ],
-        )
-        root.destroy()
-        return jsonify({'path': path}) if path else jsonify({'cancelled': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/browse-file', methods=['POST'])
 def browse_file():
     """Open a native FILE picker (for custom background / watermark paths)."""
