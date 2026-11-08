@@ -2810,20 +2810,26 @@ class Orchestrator:
     # ─── Full Recap Studio (one full script + one audio track) ─────────
 
     def step_full_recap_script(self, state):
-        """Generate one continuous Russian recap script for one or many chapters."""
+        """Write one long recap from panels already produced by AniFlow Crop 2."""
         if not state.panels and not (state.is_batch and len(state.chapter_list) > 1):
-            state.error = "Сначала подготовьте и проверьте изображения (Crop 2)."
+            state.error = "Сначала выполните штатное обнаружение и вырезание панелей (Crop 2)."
             state.save()
             return state
+
         first_chapter = min(state.chapter_list) if state.is_batch and state.chapter_list else state.current_chapter
         try:
-            from pipeline.full_recap import (
-                build_panel_context, generate_full_recap_script, merge_chapter_panels
+            from pipeline.full_recap import merge_chapter_panels
+            from pipeline.recap_script_writer import (
+                RECAP_STYLE_PROFILE_RU,
+                build_panel_context,
+                count_words,
+                generate_full_recap_script,
+                target_video_duration_seconds,
             )
-            s = dict(state.settings)
+
+            settings = dict(state.settings)
             backend = self.narrator.transport
-            vision_model = getattr(self.narrator, 'vision_model', None) or config.VISION_MODEL
-            text_model = s.get('full_recap_text_model') or getattr(
+            text_model = settings.get('full_recap_text_model') or getattr(
                 config, 'TEXT_WRITER_MODEL', config.OLLAMA_MODEL
             )
             try:
@@ -2831,97 +2837,117 @@ class Orchestrator:
             except Exception:
                 pass
 
-            chapter_entries = []
             chapters = list(state.chapter_list) if state.is_batch and len(state.chapter_list) > 1 else [state.current_chapter]
+            chapter_entries = []
             total_panels = 0
 
-            # Gather already prepared art panels from every selected chapter.
-            # Each chapter-qualified synthetic panel ID prevents collisions when
-            # panel_00001 exists in several chapters.
+            # Reuse the already cropped art panels and the OCR/visual descriptions
+            # from AniFlow's existing extraction stage. No additional crop or vision pass.
             for chapter_index, chapter_number in enumerate(chapters, start=1):
                 if self._should_cancel:
-                    raise InterruptedError("Подготовка пересказа отменена")
+                    raise InterruptedError("Создание сценария отменено")
                 if state.is_batch and len(state.chapter_list) > 1:
                     state.switch_to_chapter(chapter_number)
 
                 if not state.panels:
                     raise ValueError(
-                        f"В главе {chapter_number} нет подготовленных изображений. "
-                        "Сначала выполните Crop 2 для всех выбранных глав."
+                        f"В главе {chapter_number} нет кадров после штатной обработки Crop 2."
                     )
 
-                chapter_entries.append((chapter_number, [dict(panel) for panel in state.panels]))
-                total_panels += len(state.panels)
+                text_panels = {
+                    str(item.get('panel_id')): item
+                    for item in (state.panels_with_text or [])
+                    if item.get('panel_id') is not None
+                }
+                enriched = []
+                for original in state.panels:
+                    panel = dict(original)
+                    parent_id = panel.get('parent_panel_id')
+                    text_item = text_panels.get(str(parent_id)) if parent_id is not None else None
+                    if text_item is None:
+                        text_item = text_panels.get(str(panel.get('panel_id')))
+                    if text_item:
+                        if not panel.get('text'):
+                            panel['text'] = text_item.get('text', '')
+                        panel['visual_description'] = (
+                            text_item.get('visual_description')
+                            or text_item.get('description')
+                            or panel.get('visual_description', '')
+                        )
+                    enriched.append(panel)
+
+                chapter_entries.append((chapter_number, enriched))
+                total_panels += len(enriched)
                 self._emit_progress(
                     'full_recap_script', chapter_index, len(chapters),
-                    f"Подготовка главы {chapter_number}: {len(state.panels)} изображений"
+                    f"Подготовлено глав: {chapter_index}/{len(chapters)}; кадров: {total_panels}"
                 )
 
             all_panels = merge_chapter_panels(chapter_entries)
+            for index, panel in enumerate(all_panels, start=1):
+                panel['sequence_number'] = index
             if not all_panels:
-                raise ValueError("Не найдено изображений для пересказа.")
+                raise ValueError("После обработки AniFlow нет кадров для сценария.")
 
-            # Keep a stable project-level location in the first selected chapter.
             if state.is_batch and len(state.chapter_list) > 1 and state.current_chapter != first_chapter:
                 state.switch_to_chapter(first_chapter)
 
-            cast_characters = self._load_cast_characters(state)
             self._emit_progress(
-                'full_recap_script', 0, total_panels,
-                f"Анализ {len(chapters)} глав ({total_panels} изображений) для цельного пересказа…"
+                'full_recap_script', 0, len(all_panels),
+                f"Пишем подробный пересказ по {len(all_panels)} готовым кадрам…"
             )
-            context = build_panel_context(
-                all_panels, backend, vision_model,
-                scene_size=int(s.get('full_recap_scene_size', 5)),
-                cancel_check=lambda: self._should_cancel,
-                progress_callback=lambda c, t, m: self._emit_progress(
-                    'full_recap_script', c, t, m
-                ),
-            )
-            if self._should_cancel:
-                raise InterruptedError("Генерация пересказа отменена.")
-
+            context = build_panel_context(all_panels, scene_size=20)
+            target_words = int(settings.get('full_recap_target_words', 5000) or 5000)
             result = generate_full_recap_script(
-                context, backend, text_model,
-                cast_characters=cast_characters,
-                style_profile=s.get(
-                    'full_recap_style',
-                    'Динамичный, разговорный, естественный русский пересказ для YouTube.'
+                context,
+                backend,
+                text_model,
+                style_profile=settings.get('full_recap_style') or RECAP_STYLE_PROFILE_RU,
+                story_context=settings.get('full_recap_story_context', ''),
+                target_words=target_words,
+                progress_callback=lambda current, total, message: self._emit_progress(
+                    'full_recap_script', current, total, message
                 ),
-                story_context=s.get('full_recap_story_context', ''),
             )
+
+            word_count = count_words(result['full_text'])
+            duration = target_video_duration_seconds(word_count)
             state.full_recap_panels = all_panels
             state.full_recap_workspace_dir = state.project_dir
             state.full_recap_panel_context = context
             state.full_recap_script = result['full_text']
-            state.full_recap_visual_cues = result['visual_cues']
-            state.full_recap_word_timestamps = []
-            state.full_recap_timeline = {}
-            state.full_recap_audio_path = None
+            state.full_recap_word_count = word_count
+            state.full_recap_duration_seconds = duration
+            state.full_recap_export_dir = None
             state.full_recap_video_path = None
             state.full_recap_status = "script_ready"
             state.full_recap_titles = []
             state.full_recap_selected_title = None
             state.full_recap_thumbnails = []
+            state.full_recap_description = ""
+            state.full_recap_pinned_comment = ""
             state.full_recap_package_status = "not_started"
             state.error = None
 
             recap_dir = os.path.join(state.project_dir, "full_recap")
             os.makedirs(recap_dir, exist_ok=True)
+            with open(os.path.join(recap_dir, "script.txt"), "w", encoding="utf-8") as f:
+                f.write(result['full_text'].strip() + "\n")
             with open(os.path.join(recap_dir, "recap_script.json"), "w", encoding="utf-8") as f:
                 json.dump({
                     **result,
                     "chapters": chapters,
-                    "panel_count_before_filter": len(all_panels),
+                    "panel_count": len(all_panels),
+                    "word_count": word_count,
+                    "target_duration_seconds": duration,
+                    "seconds_per_word": 0.72,
                 }, f, ensure_ascii=False, indent=2)
             state.save()
             self._emit_progress(
                 'full_recap_script', 1, 1,
-                f"Цельный сценарий готов: {len(chapters)} глав, {len(all_panels)} исходных изображений."
+                f"Сценарий готов: {word_count} слов; расчётная длительность видео {duration / 3600:.2f} ч."
             )
         except Exception as e:
-            # Batch work may have switched chapters. Persist project-level recap
-            # failure/status on the first selected chapter, not an arbitrary last one.
             try:
                 if state.is_batch and state.chapter_list and state.current_chapter != first_chapter:
                     state.switch_to_chapter(first_chapter)
@@ -2932,147 +2958,46 @@ class Orchestrator:
             state.save()
         return state
 
-    def step_full_recap_audio(self, state):
-        """Send the complete approved script to TTS once and save one audio file."""
-        if not (state.full_recap_script or "").strip():
-            state.error = "Сначала сгенерируйте или сохраните цельный сценарий."
-            state.save()
-            return state
-        try:
-            from pipeline.full_recap_audio import generate_full_narration_audio
-            s = state.settings
-            workspace = state.full_recap_workspace_dir or state.project_dir
-            audio_dir = os.path.join(workspace, "full_recap", "audio")
-            os.makedirs(audio_dir, exist_ok=True)
-            audio_path = os.path.join(audio_dir, "full_recap_narration.mp3")
-            self._emit_progress('full_recap_audio', 0, 1, "Генерация единой озвучки…")
-            result = generate_full_narration_audio(
-                state.full_recap_script,
-                audio_path,
-                engine=s.get('tts_engine', 'edge'),
-                voice=s.get('tts_voice'),
-                rate=s.get('tts_rate'),
-                pitch=s.get('tts_pitch'),
-                speed=float(s.get('tts_speed', 1.0)),
-                elevenlabs_model=s.get('full_recap_elevenlabs_model', 'eleven_flash_v2_5'),
-            )
-            state.full_recap_audio_path = result['audio_path']
-            state.full_recap_word_timestamps = result.get('word_timestamps') or []
-            subtitle_path = result.get('subtitle_path')
-            if not state.full_recap_word_timestamps and subtitle_path and os.path.isfile(subtitle_path):
-                from pipeline.audio_alignment import parse_srt_word_timestamps
-                with open(subtitle_path, 'r', encoding='utf-8') as f:
-                    state.full_recap_word_timestamps = parse_srt_word_timestamps(f.read())
-            state.full_recap_timeline = {}
-            state.full_recap_video_path = None
-            state.full_recap_status = "audio_ready"
-            state.error = None
-            state.save()
-            self._emit_progress('full_recap_audio', 1, 1, "Единая озвучка готова.")
-        except Exception as e:
-            state.error = str(e)
-            state.full_recap_status = "audio_failed"
-            state.save()
-        return state
-
-    def step_full_recap_timeline(self, state):
-        """Align the visual timeline to the existing audio; never call TTS here."""
-        if not state.full_recap_audio_path or not os.path.isfile(state.full_recap_audio_path):
-            state.error = "Сначала сгенерируйте озвучку."
-            state.save()
-            return state
-        try:
-            from pipeline.audio_alignment import (
-                build_visual_timeline, transcribe_word_timestamps
-            )
-            from pipeline.tts_engine import _get_audio_duration
-            timestamps = state.full_recap_word_timestamps or []
-            if not timestamps:
-                self._emit_progress('full_recap_timeline', 0, 1,
-                                    "Распознавание временных меток речи…")
-                timestamps = transcribe_word_timestamps(
-                    state.full_recap_audio_path,
-                    model_size=state.settings.get('alignment_model_size', 'small'),
-                    device=state.settings.get('alignment_device', 'cpu'),
-                    compute_type=state.settings.get('alignment_compute_type', 'int8'),
-                )
-            audio_duration = float(_get_audio_duration(state.full_recap_audio_path))
-            if audio_duration <= 0:
-                raise ValueError("Не удалось определить длительность озвучки")
-            filtered_panel_ids = [
-                panel.get('panel_id')
-                for scene in state.full_recap_panel_context
-                if scene.get('scene_id') != 'filter_summary'
-                for panel in scene.get('panels', [])
-                if panel.get('panel_id') is not None
-            ]
-            panel_ids = filtered_panel_ids or [
-                panel.get('panel_id')
-                for panel in (state.full_recap_panels or state.panels)
-                if panel.get('panel_id') is not None
-            ]
-            timeline = build_visual_timeline(
-                state.full_recap_script,
-                state.full_recap_visual_cues,
-                timestamps,
-                audio_duration,
-                fallback_panel_ids=panel_ids,
-            )
-            state.full_recap_word_timestamps = timestamps
-            state.full_recap_timeline = timeline
-            state.full_recap_status = "timeline_ready"
-            state.error = None
-            state.save()
-            self._emit_progress('full_recap_timeline', 1, 1, "Визуальный таймлайн готов.")
-        except Exception as e:
-            state.error = str(e)
-            state.full_recap_status = "timeline_failed"
-            state.save()
-        return state
-
     def step_full_recap_video(self, state):
-        """Render the complete visual timeline under one unmodified narration file."""
-        if not state.full_recap_timeline or not state.full_recap_audio_path:
-            state.error = "Сначала создайте озвучку и визуальный таймлайн."
+        """Export the existing numbered panels as a silent video sized by script word count."""
+        if not (state.full_recap_script or "").strip():
+            state.error = "Сначала создайте и сохраните полный сценарий."
+            state.save()
+            return state
+        if not (state.full_recap_panels or state.panels):
+            state.error = "В проекте нет готовых панелей после штатной обработки AniFlow."
             state.save()
             return state
         try:
-            from pipeline.full_recap_renderer import render_full_recap_video
-            s = state.settings
+            from pipeline.full_recap_renderer import build_silent_recap_export
+            settings = state.settings
             workspace = state.full_recap_workspace_dir or state.project_dir
-            output_dir = os.path.join(workspace, "full_recap", "output")
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, "full_recap.mp4")
-            self._emit_progress('full_recap_video', 0, 1, "Монтаж видео под единую озвучку…")
-            custom_bg = s.get('custom_bg_path', '')
-            if custom_bg and not os.path.isabs(custom_bg):
-                custom_bg = os.path.join(config.BACKGROUNDS_DIR, custom_bg)
-            bgm_path = s.get('bgm_path', '')
-            if bgm_path and not os.path.isabs(bgm_path):
-                bgm_path = os.path.join(config.BGM_DIR, bgm_path)
-            render_full_recap_video(
+            export_dir = os.path.join(workspace, "full_recap", "export")
+            self._emit_progress('full_recap_video', 0, 1, "Нумерация кадров и подготовка немого видео…")
+
+            result = build_silent_recap_export(
                 state.full_recap_panels or state.panels,
-                state.full_recap_timeline,
-                state.full_recap_audio_path,
-                output_path,
-                resolution=s.get('video_resolution', '1080p'),
-                fps=s.get('video_fps', 30),
-                quality=s.get('video_quality', 'medium'),
-                bg_mode=s.get('bg_mode', 'blur'),
-                custom_bg_path=custom_bg or None,
-                animation_style=s.get('animation_style', 'auto'),
-                watermark_path=s.get('watermark_path') or None,
-                bgm_path=bgm_path or None,
-                bgm_volume=float(s.get('bgm_volume', config.BGM_VOLUME)),
-                progress_callback=lambda c, t, m: self._emit_progress(
-                    'full_recap_video', c, t, m
+                state.full_recap_script,
+                export_dir,
+                resolution=settings.get('video_resolution', '1080p_landscape'),
+                fps=int(settings.get('video_fps', 30)),
+                quality=settings.get('video_quality', 'medium'),
+                animation_style=settings.get('animation_style', 'auto'),
+                progress_callback=lambda current, total, message: self._emit_progress(
+                    'full_recap_video', current, total, message
                 ),
             )
-            state.full_recap_video_path = output_path
+            state.full_recap_word_count = result['word_count']
+            state.full_recap_duration_seconds = result['duration_seconds']
+            state.full_recap_export_dir = result['export_dir']
+            state.full_recap_video_path = result['video_path']
             state.full_recap_status = "video_ready"
             state.error = None
             state.save()
-            self._emit_progress('full_recap_video', 1, 1, "Готовый MP4 создан.")
+            self._emit_progress(
+                'full_recap_video', 1, 1,
+                f"Немое видео готово: {result['duration_hms']}; кадров: {result['panel_count']}."
+            )
         except Exception as e:
             state.error = str(e)
             state.full_recap_status = "video_failed"
