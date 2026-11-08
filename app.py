@@ -621,7 +621,7 @@ def get_ai_backends():
         'claude': {'available': True, 'models': ['claude-sonnet-4-20250514', 'claude-opus-4-20250514']},
     }
     try:
-        ollama_info = narrator.check_ollama()
+        ollama_info = orchestrator.narrator.check_ollama()
         backends['ollama']['available'] = ollama_info.get('available', False)
         backends['ollama']['models'] = ollama_info.get('models', [])
     except Exception:
@@ -650,7 +650,7 @@ def save_stitched_boxes_2(project_name):
 def update_panel_text(project_name, panel_id):
     """Update the EXTRACTED DIALOGUE text of a bubble panel (dialogue-mode
     review step). Keeps everything downstream in sync:
-      - panels_with_text[i]['text']          (used by dialogue-mode TTS)
+      - panels_with_text[i]['text']          (used by the plot recap context)
       - art panels' inherited 'text'         (narration context)
       - output/extracted_txt/... .txt cache  ([PANEL N] blocks)
     """
@@ -1000,7 +1000,7 @@ def build_cast_from_manga():
                 socketio.emit('progress', {'stage': 'build_cast', 'current': idx + 1, 'total': len(sample),
                     'message': f'Analyzing image {idx+1}/{len(sample)}...', 'percent': int(((idx+1)/len(sample))*100)})
                 try:
-                    chars = narrator.detect_characters(img_path)
+                    chars = orchestrator.narrator.detect_characters(img_path)
                     for ch in chars:
                         name = ch.get('name', '').strip()
                         if name and name.lower() not in ('unknown', 'narrator', 'n/a', 'none', ''):
@@ -1336,7 +1336,7 @@ def get_stitched_detected_image(project_name):
 
 @app.route('/api/ollama/models', methods=['GET'])
 def get_ollama_models():
-    return jsonify(narrator.check_ollama())
+    return jsonify(orchestrator.narrator.check_ollama())
 
 # ─── Asset Management ────────────────────────────────────────────
 @app.route('/api/assets/<asset_type>', methods=['GET'])
