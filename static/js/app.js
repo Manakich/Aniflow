@@ -194,7 +194,7 @@ function renderSourceStep() {
           <input type="text" class="form-input" id="inputMangaUrl" style="flex:1"
                  placeholder="Вставьте ссылку на страницу манги/манхвы"
                  value="${esc(APP._lastUrl || '')}">
-          <button class="btn btn-primary" onclick="analyzeUrl()" id="btnАнализировать">Найти главы</button>
+          <button class="btn btn-primary" onclick="analyzeUrl()" id="btnAnalyze">Найти главы</button>
         </div>
         <div class="text-xs text-dim mt-2">Приложение проверит доступные главы. После выбора диапазона оно скачает страницы и запустит штатную обработку AniFlow один раз.</div>
       </div>
@@ -205,7 +205,7 @@ function renderSourceStep() {
 
   document.getElementById('stepActions').innerHTML = `
     <div class="text-xs text-dim">После скачивания главы приложение продолжит обработку автоматически.</div>`;
-  if (SCRAPER.mangaInfo) renderАнализироватьResult(SCRAPER.mangaInfo);
+  if (SCRAPER.mangaInfo) renderAnalyzeResult(SCRAPER.mangaInfo);
 }
 
 async function analyzeUrl() {
@@ -214,7 +214,7 @@ async function analyzeUrl() {
 
   APP._lastUrl = url;
   SCRAPER.analyzing = true;
-  const btn = document.getElementById('btnАнализировать');
+  const btn = document.getElementById('btnAnalyze');
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner"></div> Анализирую…';
 
@@ -234,7 +234,7 @@ async function analyzeUrl() {
       toast(data.error, 'error');
     } else {
       SCRAPER.mangaInfo = data;
-      renderАнализироватьResult(data);
+      renderAnalyzeResult(data);
       toast(`Found "${data.manga_name}" — ${data.total_chapters} chapters`, 'success');
     }
   } catch (e) {
@@ -247,7 +247,7 @@ async function analyzeUrl() {
   }
 }
 
-function renderАнализироватьResult(data) {
+function renderAnalyzeResult(data) {
   const resultEl = document.getElementById('analyzeResult');
   if (!resultEl) return;
 
