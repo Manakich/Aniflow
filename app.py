@@ -459,6 +459,26 @@ def serve_full_recap_video(project_name):
     return send_file(path, mimetype='video/mp4', as_attachment=False)
 
 
+@app.route('/api/full-recap/<project_name>/export', methods=['GET'])
+def download_full_recap_export(project_name):
+    """Download the complete silent-video project folder as a ZIP archive."""
+    import zipfile
+    state = PipelineState.load(project_name)
+    export_dir = state.full_recap_export_dir
+    if not export_dir or not os.path.isdir(export_dir):
+        return jsonify({'error': 'Сначала создайте немое видео и папку экспорта'}), 404
+
+    archive_path = os.path.join(os.path.dirname(export_dir), 'full_recap_export.zip')
+    with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=4) as archive:
+        for root, _dirs, files in os.walk(export_dir):
+            for filename in files:
+                file_path = os.path.join(root, filename)
+                archive.write(file_path, os.path.relpath(file_path, export_dir))
+
+    download_name = f"{state.manhwa_name or project_name}_full_recap_export.zip"
+    return send_file(archive_path, as_attachment=True, download_name=download_name)
+
+
 @app.route('/api/full-recap/<project_name>/script', methods=['PUT'])
 def update_full_recap_script(project_name):
     """Save an edited recap script and recalculate its silent-video duration."""
