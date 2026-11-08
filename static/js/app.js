@@ -194,7 +194,7 @@ function renderSourceStep() {
           <input type="text" class="form-input" id="inputMangaUrl" style="flex:1"
                  placeholder="Вставьте ссылку на страницу манги/манхвы"
                  value="${esc(APP._lastUrl || '')}">
-          <button class="btn btn-primary" onclick="analyzeUrl()" id="btnAnalyze">Найти главы</button>
+          <button class="btn btn-primary" onclick="analyzeUrl()" id="btnАнализировать">Найти главы</button>
         </div>
         <div class="text-xs text-dim mt-2">Приложение проверит доступные главы. После выбора диапазона оно скачает страницы и запустит штатную обработку AniFlow один раз.</div>
       </div>
@@ -205,21 +205,21 @@ function renderSourceStep() {
 
   document.getElementById('stepActions').innerHTML = `
     <div class="text-xs text-dim">После скачивания главы приложение продолжит обработку автоматически.</div>`;
-  if (SCRAPER.mangaInfo) renderAnalyzeResult(SCRAPER.mangaInfo);
+  if (SCRAPER.mangaInfo) renderАнализироватьResult(SCRAPER.mangaInfo);
 }
 
 async function analyzeUrl() {
   const url = document.getElementById('inputMangaUrl').value.trim();
-  if (!url) return toast('Please paste a manhwa URL', 'error');
+  if (!url) return toast('Вставьте ссылку на мангу или манхву', 'error');
 
   APP._lastUrl = url;
   SCRAPER.analyzing = true;
-  const btn = document.getElementById('btnAnalyze');
+  const btn = document.getElementById('btnАнализировать');
   btn.disabled = true;
-  btn.innerHTML = '<div class="spinner"></div> Analyzing...';
+  btn.innerHTML = '<div class="spinner"></div> Анализирую…';
 
   const resultEl = document.getElementById('analyzeResult');
-  resultEl.innerHTML = `<div class="text-sm text-dim mt-1"><div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></div> Analyzing URL...</div>`;
+  resultEl.innerHTML = `<div class="text-sm text-dim mt-1"><div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></div> Проверяю ссылку и ищу доступные главы…</div>`;
 
   try {
     const r = await fetch('/api/scraper/analyze', {
@@ -234,20 +234,20 @@ async function analyzeUrl() {
       toast(data.error, 'error');
     } else {
       SCRAPER.mangaInfo = data;
-      renderAnalyzeResult(data);
+      renderАнализироватьResult(data);
       toast(`Found "${data.manga_name}" — ${data.total_chapters} chapters`, 'success');
     }
   } catch (e) {
-    resultEl.innerHTML = `<div class="text-sm" style="color:var(--color-error);margin-top:8px;">❌ Network error: ${esc(e.message)}</div>`;
-    toast('Analyze failed: ' + e.message, 'error');
+    resultEl.innerHTML = `<div class="text-sm" style="color:var(--color-error);margin-top:8px;">❌ Ошибка сети: ${esc(e.message)}</div>`;
+    toast('Анализировать failed: ' + e.message, 'error');
   } finally {
     SCRAPER.analyzing = false;
     btn.disabled = false;
-    btn.innerHTML = '🔍 Analyze';
+    btn.innerHTML = '🔍 Анализировать';
   }
 }
 
-function renderAnalyzeResult(data) {
+function renderАнализироватьResult(data) {
   const resultEl = document.getElementById('analyzeResult');
   if (!resultEl) return;
 
@@ -275,7 +275,7 @@ function renderAnalyzeResult(data) {
 
       <div style="margin-top:18px;">
         <div class="form-group" style="margin-bottom:10px;">
-          <label class="form-label" style="font-size:13px; font-weight:700; color:var(--ink);">📥 Select chapters to download</label>
+          <label class="form-label" style="font-size:13px; font-weight:700; color:var(--ink);">📥 Выберите главы для скачивания</label>
           <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" class="form-input" id="inputChapterRange" style="flex:1; font-weight:600;"
                    placeholder="e.g. 23 or 23-67 or 1,5,10" value="${Math.round(firstCh)}">
@@ -284,11 +284,11 @@ function renderAnalyzeResult(data) {
             </button>
           </div>
           <div class="text-xs" style="color:var(--text-secondary); margin-top:6px; line-height:1.5;">
-            💡 <b>Single:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">23</code>
-            <b>Range:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">23-67</code>
-            <b>Multiple:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">1,5,10</code>
+            💡 <b>Одна глава:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">23</code>
+            <b>Диапазон:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">23-67</code>
+            <b>Несколько глав:</b> <code style="background:var(--paper); padding:2px 6px; border-radius:4px; border:1px solid var(--hairline);">1,5,10</code>
             <br>
-            <span style="color:var(--text-dim); font-size:11px;">For batch processing: download multiple chapters and process them all at once.</span>
+            <span style="color:var(--text-dim); font-size:11px;">Можно выбрать несколько глав — они будут объединены в один общий пересказ.</span>
           </div>
         </div>
       </div>
@@ -297,7 +297,7 @@ function renderAnalyzeResult(data) {
       <div class="progress-container hidden" id="downloadProgress">
         <div class="progress-bar-wrap"><div class="progress-bar-fill" id="downloadProgressBar"></div></div>
         <div class="progress-label">
-          <span id="downloadProgressMsg">Downloading...</span>
+          <span id="downloadProgressMsg">Скачиваю…</span>
           <span class="pct" id="downloadProgressPct">0%</span>
         </div>
       </div>
@@ -331,20 +331,20 @@ function parseChapterRange(rangeStr, allChapters) {
 }
 
 async function downloadChapters() {
-  if (!SCRAPER.mangaInfo) return toast('Analyze a URL first', 'error');
+  if (!SCRAPER.mangaInfo) return toast('Анализировать a URL first', 'error');
 
   const rangeStr = document.getElementById('inputChapterRange').value.trim();
-  if (!rangeStr) return toast('Enter a chapter number or range', 'error');
+  if (!rangeStr) return toast('Укажите номер главы или диапазон', 'error');
 
   const chapters = parseChapterRange(rangeStr, SCRAPER.mangaInfo.chapters);
-  if (chapters.length === 0) return toast('No matching chapters found in that range', 'error');
+  if (chapters.length === 0) return toast('В выбранном диапазоне главы не найдены', 'error');
 
   const url = document.getElementById('inputMangaUrl').value.trim();
   SCRAPER.downloading = true;
 
   const btn = document.getElementById('btnDownload');
   btn.disabled = true;
-  btn.innerHTML = '<div class="spinner"></div> Downloading...';
+  btn.innerHTML = '<div class="spinner"></div> Скачиваю…';
 
   const progressEl = document.getElementById('downloadProgress');
   progressEl.classList.remove('hidden');
@@ -363,7 +363,7 @@ async function downloadChapters() {
     }
     // Download happens async via websocket — step_complete will fire
   } catch (e) {
-    toast('Download failed: ' + e.message, 'error');
+    toast('Ошибка скачивания: ' + e.message, 'error');
     btn.disabled = false;
     btn.innerHTML = '📥 Download';
     SCRAPER.downloading = false;
@@ -379,7 +379,7 @@ socket.on('step_complete', function _handleDownload(data) {
   if (btn) { btn.disabled = false; btn.innerHTML = '📥 Download'; }
 
   if (data.error) {
-    toast('Download error: ' + data.error, 'error');
+    toast('Ошибка загрузки: ' + data.error, 'error');
     return;
   }
 
@@ -397,7 +397,7 @@ socket.on('step_complete', function _handleDownload(data) {
     resultEl.innerHTML = `
       <div style="margin-top:16px; padding:16px; background:var(--green-tint); border:2px solid var(--green); border-radius:8px;">
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
-          <div class="badge badge-success" style="font-size:14px; font-weight:700; padding:6px 12px;">✓ Download complete</div>
+          <div class="badge badge-success" style="font-size:14px; font-weight:700; padding:6px 12px;">✓ Загрузка завершена</div>
           <div style="font-size:16px; font-weight:800; font-family:var(--font-display); color:var(--ink);">📚 ${esc(mangaName)}</div>
         </div>
         
