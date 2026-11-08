@@ -328,7 +328,6 @@ class PipelineState:
         self.detect_dir = self.paths['detect']
         self.crop_dir = self.paths['crop']
         self.text_dir = self.paths['text']
-        self.audio_dir = self.paths['audio']
         self.clips_dir = self.paths['clips']
         self.state_file = self.paths['state']
         
@@ -859,14 +858,14 @@ class PipelineState:
         Scan output directories to determine the highest completed pipeline stage.
         Uses new organized folder structure.
         """
-        # ── clips_done: video clips exist in manhwa_clips/ ──────────────────
+        # ── Legacy clip folders: ignored by the silent Full Recap workflow ─
         if os.path.isdir(self.clips_dir):
             clips = [f for f in os.listdir(self.clips_dir) 
                     if f.endswith('.mp4') and os.path.getsize(os.path.join(self.clips_dir, f)) > 10000]
             if clips:
                 return 'clips_done'
         
-        # ── video_done: legacy video path or clips folder ───────────────────
+        # ── Legacy video files: ignored by the silent Full Recap workflow ───
         if self.video_path and os.path.exists(self.video_path):
             return 'video_done'
 
@@ -1233,7 +1232,7 @@ class Orchestrator:
         # Check if we have images - either stage is 'loaded' OR raw_pages is not empty
         has_images = (state.stage in ['loaded', 'stitched', 'detected1', 'cropped1', 'stitched2',
                                        'detected2', 'cropped2', 'text_extracted', 'text_removed',
-                                       'narrated', 'audio_done', 'video_done']) or len(state.raw_pages) > 0
+                                       'text_removed']) or len(state.raw_pages) > 0
         
         if not has_images:
             state.error = "Must load images first."
@@ -1503,7 +1502,7 @@ class Orchestrator:
         """Detect 1: Run panel_with_bubble_text model on Stitched Image 1."""
         if state.stage not in ('clips_done', 'stitched', 'detected1', 'cropped1', 'stitched2',
                                'detected2', 'cropped2', 'text_extracted',
-                               'text_removed', 'narrated', 'audio_done', 'video_done'):
+                               'text_removed', 'narrated', 'text_removed'):
             state.error = "Must stitch images first."
             return state
         
@@ -1566,7 +1565,7 @@ class Orchestrator:
         """Crop 1: Crop Detect 1 results into Manhwa_panel_with_bubble/title/chapter/0001.jpg."""
         if state.stage not in ('clips_done', 'detected1', 'cropped1', 'stitched2', 'detected2',
                                'cropped2', 'text_extracted', 'text_removed',
-                               'narrated', 'audio_done', 'video_done'):
+                               ):
             state.error = "Must run Detect 1 first."
             return state
         
@@ -1841,7 +1840,7 @@ class Orchestrator:
         ['clean_art_panels'] = False to keep the raw crops."""
         if not state.is_batch:
             if state.stage not in ('clips_done', 'detected2', 'cropped2', 'text_extracted', 'text_removed',
-                                   'narrated', 'audio_done', 'video_done'):
+                                   'text_removed'):
                 state.error = "Must run Detect 2 first."
                 return state
         return self._run_batch_or_single(state, 'crop2', self._crop_art_panels_single)
@@ -2499,33 +2498,6 @@ class Orchestrator:
         return state
 
     # ─── Scene Flow Steps (YouTube-style) ────────────────────────────
-
-    def step_classify_panels(self, state):
-        """Classify every panel as action / standard / epic and set target_duration."""
-        valid = ('clips_done', 'cropped2', 'text_extracted', 'text_removed', 'narrated',
-                 'audio_done', 'video_done')
-        if state.stage not in valid:
-            state.error = "Must crop art panels first (Crop 2)."
-            return state
-        if not state.panels:
-            state.error = "No panels to classify."
-            state.save()
-            return state
-
-        self._emit_progress('classify_panels', 0, 1, "Classifying panels (action / standard / epic)...")
-        try:
-            from pipeline.panel_classifier import classify_all_panels, get_classification_summary
-            state.panels = classify_all_panels(state.panels, force=True)
-            summary = get_classification_summary(state.panels)
-            state.error = None
-            state.save()
-            msg = (f"\u2705 Classified {len(state.panels)} panels — "
-                   f"action:{summary['action']} standard:{summary['standard']} epic:{summary['epic']}")
-            self._emit_progress('classify_panels', 1, 1, msg)
-        except Exception as e:
-            state.error = str(e)
-            state.save()
-        return state
 
     def rewrite_script(self, state, style="dramatic", custom_instructions=None):
         self._emit_progress('rewrite', 0, len(state.panels), f"Rewriting in {style} style...")
