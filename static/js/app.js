@@ -8,7 +8,7 @@ const socket = io({ transports: ['polling', 'websocket'] });
 
 // ─── Global State ────────────────────────────────────────
 const APP = {
-  mode: null,           // 'dialogue' | 'narrated'
+  mode: 'full_recap',   // Single-purpose Manhwa Recap Studio
   currentStep: 0,
   projectName: '',
   sourceFolder: '',
@@ -28,32 +28,6 @@ const APP = {
 };
 
 // ─── Step Definitions ────────────────────────────────────
-const DIALOGUE_STEPS = [
-  { id: 'source',       label: 'Source',        title: 'Select Chapter Source',       subtitle: 'Choose the folder containing your manhwa chapter images' },
-  { id: 'stitch',       label: 'Stitch',        title: 'Stitch & Detect Panels',      subtitle: 'Stitch pages into strips and detect individual panels' },
-  { id: 'review',       label: 'Review',        title: 'Review Cropped Panels',       subtitle: 'Verify the detected and cropped panels look correct' },
-  { id: 'extract_text', label: 'Extract',       title: 'Extract Dialogue Text',       subtitle: 'Extract text from speech bubbles using AI vision' },
-  { id: 'review2',      label: 'Review Text',   title: 'Review Extracted Text',       subtitle: 'Verify the extracted text for each panel' },
-  { id: 'tts',          label: 'Audio',         title: 'Generate Audio',              subtitle: 'Convert extracted dialogue to speech' },
-  { id: 'video',        label: 'Video',         title: 'Generate Clips',              subtitle: 'Generate individual video clips for each panel' },
-  { id: 'review_clips', label: 'Review Clips',  title: 'Review Video Clips',          subtitle: 'Preview and download individual video clips' },
-  { id: 'sort_clips',   label: 'Sort Clips',    title: 'Sort & Organize Clips',       subtitle: 'Organize clips from multiple chapters into folders' },
-];
-
-const NARRATED_STEPS = [
-  { id: 'source',       label: 'Source',        title: 'Select Chapter Source',       subtitle: 'Choose the folder containing your manhwa chapter images' },
-  { id: 'cast',         label: 'Cast',          title: 'Character Cast (Optional)',   subtitle: 'Scan chapters, group faces and name characters for accurate narration' },
-  { id: 'stitch',       label: 'Stitch',        title: 'Stitch & Two-Stage Detection', subtitle: 'Stitch pages, crop bubble panels, then detect & crop clean art panels' },
-  { id: 'review',       label: 'Review',        title: 'Review Art Panels',           subtitle: 'Verify the detected art panels (without bubble text) look correct' },
-  { id: 'extract_text', label: 'Extract',       title: 'Extract Dialogue Text',       subtitle: 'Extract text from the bubble panels (mapped to art panels)' },
-  { id: 'narrate',      label: 'Narrate',       title: 'AI Narration',                subtitle: 'Generate flowing 3rd-person narration from the mapped panels' },
-  { id: 'review2',      label: 'Review Text',   title: 'Review Narration',            subtitle: 'Check each panel\'s narration — edit or re-narrate any panel individually' },
-  { id: 'tts',          label: 'Audio',         title: 'Generate Audio',              subtitle: 'Convert narration to speech' },
-  { id: 'video',        label: 'Video',         title: 'Generate Clips',              subtitle: 'Combine narration audio with the clean art panels' },
-  { id: 'review_clips', label: 'Review Clips',  title: 'Review Video Clips',          subtitle: 'Preview and download individual video clips' },
-  { id: 'sort_clips',   label: 'Sort Clips',    title: 'Sort & Organize Clips',       subtitle: 'Organize clips from multiple chapters into folders' },
-];
-
 const FULL_RECAP_STEPS = [
   { id: 'source', label: 'Ссылка', title: 'Ссылка на мангу и главы', subtitle: 'Вставьте URL, выберите одну главу или диапазон глав' },
   { id: 'stitch', label: 'Кадры', title: 'Штатная обработка AniFlow', subtitle: 'Один проход обнаружения и вырезания панелей через существующий Crop 2' },
@@ -79,7 +53,6 @@ async function checkStatus() {
     const d = await r.json();
     setDot('dotOllama', d.ollama?.running);
     setDot('dotFFmpeg', d.ffmpeg);
-    setDot('dotTTS', d.tts?.edge_tts || false);
   } catch (e) { /* ignore */ }
 }
 
@@ -145,7 +118,6 @@ function renderBatchDashboard(projects) {
           <div style="margin-bottom:10px;">${chips}</div>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px;" onclick="openBatchProject('${esc(p.name)}')">📂 Open</button>
-            <button class="btn btn-primary" style="padding:6px 14px; font-size:12px;" onclick="runFullBatchForProject('${esc(p.name)}')">🚀 Run Full Batch</button>
             <button class="btn btn-secondary" style="padding:6px 14px; font-size:12px; color:var(--color-error); border-color:var(--color-error);" onclick="confirmDeleteProject('${esc(p.name)}')" title="Delete this project and all its files">🗑️ Delete</button>
           </div>
         </div>
@@ -156,8 +128,8 @@ function renderBatchDashboard(projects) {
 }
 
 async function openBatchProject(name) {
-  APP.mode = 'dialogue';
-  APP.steps = DIALOGUE_STEPS;
+  APP.mode = 'full_recap';
+  APP.steps = FULL_RECAP_STEPS;
   APP.projectName = name;
   APP.projectData = null;
   document.getElementById('viewHome').classList.add('hidden');
@@ -1302,8 +1274,8 @@ async function runFullBatchFromSource() {
 async function runFullBatchForProject(projectName) {
   // Resume an existing project (dashboard / stitch step) with its saved settings
   APP.projectName = projectName;
-  APP.mode = APP.mode || 'dialogue';
-  APP.steps = APP.mode === 'narrated' ? NARRATED_STEPS : DIALOGUE_STEPS;
+  APP.mode = 'full_recap';
+  APP.steps = FULL_RECAP_STEPS;
   let settings = {};
   try {
     const r = await fetch(`/api/projects/${encodeURIComponent(projectName)}`);
