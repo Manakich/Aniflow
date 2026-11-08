@@ -262,10 +262,10 @@ function renderAnalyzeResult(data) {
         <div style="flex:1;">
           <div style="font-size:20px; font-weight:800; font-family:var(--font-display); color:var(--ink); margin-bottom:6px;">📖 ${esc(data.manga_name)}</div>
           <div class="text-xs" style="color:var(--text-secondary); margin-bottom:8px; font-weight:500;">
-            <span>🌐 ${esc(data.site || 'Unknown Site')}</span>
+            <span>🌐 ${esc(data.site || 'Неизвестный сайт')}</span>
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-            <div class="badge badge-success" style="font-size:13px; font-weight:600;">✓ ${data.total_chapters} chapters available</div>
+            <div class="badge badge-success" style="font-size:13px; font-weight:600;">✓ доступно глав: ${data.total_chapters}</div>
             <div class="badge" style="background:var(--paper); border:1px solid var(--blue); color:var(--blue); font-size:13px;">
               📊 Ch.${firstCh} → Ch.${lastCh}
             </div>
@@ -278,7 +278,7 @@ function renderAnalyzeResult(data) {
           <label class="form-label" style="font-size:13px; font-weight:700; color:var(--ink);">📥 Выберите главы для скачивания</label>
           <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" class="form-input" id="inputChapterRange" style="flex:1; font-weight:600;"
-                   placeholder="e.g. 23 or 23-67 or 1,5,10" value="${Math.round(firstCh)}">
+                   placeholder="Например: 23, 23-67 или 1,5,10" value="${Math.round(firstCh)}">
             <button class="btn btn-primary" onclick="downloadChapters()" id="btnDownload" style="font-weight:600; padding:10px 20px;">
               📥 Download
             </button>
@@ -386,9 +386,9 @@ socket.on('step_complete', function _handleDownload(data) {
   const result = data.result;
   if (!result) return;
 
-  toast(`Downloaded ${result.downloaded?.length || 0} chapter(s) — ${result.total_images || 0} images!`, 'success');
+  toast(`Загружено глав: ${result.downloaded?.length || 0} · страниц: ${result.total_images || 0}`, 'success');
 
-  // Show results and auto-fill project name & path
+  // Показать результат и автоматически заполнить проект
   const downloaded = result.downloaded || [];
   const resultEl = document.getElementById('downloadResult');
   const mangaName = (result.manga_name || 'Unknown');
@@ -403,11 +403,11 @@ socket.on('step_complete', function _handleDownload(data) {
         
         <div style="background:var(--paper); padding:12px; border-radius:6px; border:1px solid var(--green); margin-bottom:12px;">
           <div style="font-size:13px; font-weight:600; color:var(--ink); margin-bottom:8px;">
-            📊 Downloaded ${downloaded.length} chapter${downloaded.length > 1 ? 's' : ''} • ${result.total_images || 0} total images
+            📊 Глав: ${downloaded.length} · страниц: ${result.total_images || 0}
           </div>
           ${downloaded.map(d => `
             <div class="text-xs" style="color:var(--text-secondary); margin:4px 0; padding:4px 8px; background:var(--paper-tint); border-radius:4px; font-family:monospace;">
-              📖 Chapter ${String(d.chapter).padStart(5, '0')}: ${d.images} images
+              📖 Глава ${String(d.chapter).padStart(5, '0')}: ${d.images} изображений
               <br><span style="opacity:0.6; font-size:11px;">→ ${esc(d.path)}</span>
             </div>
           `).join('')}
@@ -565,7 +565,7 @@ async function startSource() {
     });
     const d = await r.json();
     if (d.error) { toast(d.error, 'error'); setRunning(false); return; }
-    toast('Chapter loaded!', 'success');
+    toast('Главы загружены.', 'success');
   } catch (e) {
     toast('Failed to load: ' + e.message, 'error');
     setRunning(false);
