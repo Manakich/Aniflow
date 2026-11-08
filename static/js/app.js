@@ -2617,6 +2617,7 @@ function renderFullRecapVideoStep() {
       <div class="settings-panel-title">⏱️ Расчёт длительности</div>
       <div id="fullRecapDurationEstimate" class="text-lg">Загружаю сценарий…</div>
       <div class="text-xs text-dim mt-1">Формула: количество слов × 0,72 секунды. Все вырезанные кадры будут объединены по порядку с плавным движением. Аудиодорожки в видео не будет.</div>
+      <a class="btn btn-secondary" style="display:inline-block;margin-top:12px;text-decoration:none;" href="/api/full-recap/${encodeURIComponent(APP.projectName)}/script/download" download>Скачать сценарий TXT</a>
     </div>
     <div class="form-row">
       <div class="form-group">
