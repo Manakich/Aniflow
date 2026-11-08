@@ -284,7 +284,6 @@ class PipelineState:
         self.detect_dir = self.paths['detect']
         self.crop_dir = self.paths['crop']
         self.text_dir = self.paths['text']
-        self.audio_dir = self.paths['audio']
         self.clips_dir = self.paths['clips']
         self.state_file = self.paths['state']
         
@@ -299,7 +298,6 @@ class PipelineState:
         os.makedirs(self.detect_dir, exist_ok=True)
         os.makedirs(self.crop_dir, exist_ok=True)
         os.makedirs(self.text_dir, exist_ok=True)
-        os.makedirs(self.audio_dir, exist_ok=True)
         os.makedirs(self.clips_dir, exist_ok=True)
     
     def switch_to_chapter(self, chapter_num: int):
@@ -872,17 +870,6 @@ class PipelineState:
         if self.video_path and os.path.exists(self.video_path):
             return 'video_done'
 
-        # ── audio_done: audio files exist in manhwa_audio/ ──────────────────
-        if os.path.isdir(self.audio_dir):
-            audio_files = [f for f in os.listdir(self.audio_dir) 
-                          if f.endswith('.mp3') and os.path.getsize(os.path.join(self.audio_dir, f)) > 1000]
-            if audio_files:
-                return 'audio_done'
-
-        # ── narrated: panels have narration text ────────────────────────────
-        if any(p.get('narration') or p.get('scene_narration') for p in self.panels):
-            return 'narrated'
-
         # ── text_extracted: text files exist in manhwa_text/ ────────────────
         if os.path.isdir(self.text_dir):
             text_files = [f for f in os.listdir(self.text_dir) 
@@ -1013,8 +1000,7 @@ class Orchestrator:
     _STAGE_RANK = {
         s: i for i, s in enumerate([
             'init','loaded','stitched','detected1','cropped1',
-            'stitched2','detected2','cropped2','text_extracted',
-            'text_removed','narrated','audio_done','video_done','clips_done'
+            'stitched2','detected2','cropped2','text_extracted'
         ])
     }
 
