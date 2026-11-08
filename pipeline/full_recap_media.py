@@ -163,7 +163,9 @@ def generate_title_options(
     """Generate three titles, one video description, and one pinned comment."""
     import llm_transport
 
-    reference_style = (title_reference_text or DEFAULT_TITLE_STYLE_PROFILE_RU).strip()
+    reference_style = DEFAULT_TITLE_STYLE_PROFILE_RU
+    if title_reference_text.strip():
+        reference_style += "\n\nДополнительные текстовые референсы этого выпуска:\n" + title_reference_text.strip()
     if title_reference_paths and vision_model:
         extracted = _read_title_reference_style(
             title_reference_paths, backend, vision_model
@@ -286,9 +288,9 @@ def _thumbnail_prompt(
     style_profile: str = DEFAULT_THUMBNAIL_STYLE_PROFILE_RU,
 ) -> str:
     concepts = [
-        "A dramatic close-up of the main protagonist, strong readable facial expression, cinematic high contrast, clear separation from background.",
-        "A dynamic action moment that captures the central conflict, strong diagonal composition, motion and energy, unmistakable focal point.",
-        "A mysterious cinematic reveal showing the key threat or turning point, atmospheric depth, one dominant visual hook.",
+        "Bright saturated fantasy thumbnail. Large expressive protagonist close-up with one clear story situation. Yellow Russian caption area with a thick black outline and one directional arrow; energetic, readable, high-impact composition.",
+        "Dark dramatic red-and-black thumbnail. Large central face or antagonist, sharp cinematic lighting, strong red accents, emotional danger and high contrast. Leave a clean region for bold yellow or white Russian caption text.",
+        "Epic progression/action thumbnail. Put the hero and the main threat or transformation in a strong split/comparison composition. Saturated colours, sharp silhouettes, one simple arrow or visual marker, bold yellow caption with black outline.",
     ]
     return f"""Create one polished YouTube thumbnail illustration for a Russian manhwa recap episode.
 
@@ -385,7 +387,7 @@ def generate_thumbnail_variants(
     titles: list[dict[str, str]],
     *,
     api_key: str | None = None,
-    model: str = "gpt-image-2",
+    model: str = "gpt-image-2.5-sunburst",
     base_url: str = "https://api.openai.com/v1",
     progress_callback=None,
 ) -> list[dict[str, Any]]:
