@@ -54,7 +54,9 @@ def test_generate_title_options_uses_one_llm_call_and_returns_three_titles(monke
                     {"title": "Он пробудил силу, которой боялся весь мир", "thumbnail_text": "СИЛА ПРОБУДИЛАСЬ", "angle": "power"},
                     {"title": "Один шаг героя превратил охоту в катастрофу", "thumbnail_text": "ОХОТА ОБЕРНУЛАСЬ УЖАСОМ", "angle": "twist"},
                     {"title": "В подземелье скрывалось то, что нельзя было разбудить", "thumbnail_text": "НЕ НАДО БЫЛО ЕГО БУДИТЬ", "angle": "mystery"},
-                ]
+                ],
+                "description": "Герой пробуждает древнюю силу и сталкивается с угрозой из подземелья. Подписывайтесь и делитесь мнением! #манхва #пересказ #фэнтези",
+                "pinned_comment": "Как бы вы поступили на месте героя после пробуждения этой силы? Напишите своё мнение!",
             }, ensure_ascii=False)
 
     monkeypatch.setitem(
@@ -72,6 +74,8 @@ def test_generate_title_options_uses_one_llm_call_and_returns_three_titles(monke
     assert len(calls) == 1
     assert len(result["titles"]) == 3
     assert result["titles"][0]["thumbnail_text"] == "СИЛА ПРОБУДИЛАСЬ"
+    assert "подземелья" in result["description"]
+    assert "героя" in result["pinned_comment"]
 
 
 def test_generate_three_reference_guided_thumbnails_with_exact_16_9_size(monkeypatch, tmp_path):
