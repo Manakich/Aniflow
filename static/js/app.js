@@ -55,17 +55,14 @@ const NARRATED_STEPS = [
 ];
 
 const FULL_RECAP_STEPS = [
-  { id: 'source', label: 'Source', title: 'Select Manga Source', subtitle: 'Use a chapter URL or a local folder of source pages' },
-  { id: 'cast', label: 'Cast', title: 'Character Names (Optional)', subtitle: 'Import character names to improve story continuity' },
-  { id: 'stitch', label: 'Panels', title: 'Detect & Prepare Art Panels', subtitle: 'Create clean art panels in reading order' },
-  { id: 'review', label: 'Review', title: 'Review Extracted Panels', subtitle: 'Remove empty backgrounds, duplicates and unwanted panels' },
-  { id: 'extract_text', label: 'Text', title: 'Extract Dialogue', subtitle: 'Read speech bubbles to give the storyteller context' },
-  { id: 'full_script', label: 'Script', title: 'Generate One Complete Russian Script', subtitle: 'Create one connected story, not narration per frame' },
-  { id: 'full_review', label: 'Edit', title: 'Review the Complete Script', subtitle: 'Edit the full narration before sending it to TTS' },
-  { id: 'tts', label: 'Voice', title: 'Generate One Complete Voice Track', subtitle: 'Choose a voice and synthesize the entire text in one request' },
-  { id: 'full_timeline', label: 'Sync', title: 'Match Images to the Voice Track', subtitle: 'Use speech timestamps to arrange panels under the continuous audio' },
-  { id: 'full_video', label: 'Export', title: 'Render the Complete Video', subtitle: 'Create one continuous MP4 with subtle motion and optional music' },
-  { id: 'full_package', label: 'YouTube', title: 'Generate Thumbnails & Titles', subtitle: 'Use your per-video references to create three covers and three title options' },
+  { id: 'source', label: 'Ссылка', title: 'Ссылка на мангу и главы', subtitle: 'Вставьте URL, выберите одну главу или диапазон глав' },
+  { id: 'stitch', label: 'Кадры', title: 'Штатная обработка AniFlow', subtitle: 'Один проход обнаружения и вырезания панелей через существующий Crop 2' },
+  { id: 'review', label: 'Проверка', title: 'Готовые панели', subtitle: 'Проверьте результат штатного извлечения изображений' },
+  { id: 'extract_text', label: 'Контекст', title: 'Текст и описания', subtitle: 'Используйте уже извлечённый OCR-текст и описания сцен' },
+  { id: 'full_script', label: 'Сценарий', title: 'Полный русский пересказ', subtitle: 'Сценарий в стиле выбранного профиля и заданного объёма' },
+  { id: 'full_review', label: 'Редактор', title: 'Проверка сценария', subtitle: 'Исправьте текст; длительность видео пересчитается автоматически' },
+  { id: 'full_video', label: 'Видео', title: 'Беззвучный видеоряд', subtitle: 'Нумерация всех готовых кадров и MP4 на 0,72 секунды на слово' },
+  { id: 'full_package', label: 'YouTube', title: 'Упаковка ролика', subtitle: 'Три превью, три названия, описание и закреплённый комментарий' },
 ];
 
 // ─── Init ────────────────────────────────────────────────
@@ -238,7 +235,7 @@ function resumeProject(name) {
   // Load project and determine which mode it was using
   APP.projectName = name;
   // Default to dialogue mode for resume
-  selectMode('dialogue');
+  selectMode('full_recap');
   APP.currentStep = 2; // jump to review
   renderWizard();
   loadProjectData(name);
@@ -246,10 +243,9 @@ function resumeProject(name) {
 
 // ─── Mode Selection ──────────────────────────────────────
 function selectMode(mode) {
-  APP.mode = mode;
-  APP.steps = mode === 'dialogue'
-    ? DIALOGUE_STEPS
-    : (mode === 'full_recap' ? FULL_RECAP_STEPS : NARRATED_STEPS);
+  // This fork is a single-purpose application: only Full Recap Studio is exposed.
+  APP.mode = 'full_recap';
+  APP.steps = FULL_RECAP_STEPS;
   APP.currentStep = 0;
   APP.projectName = '';
   APP.sourceFolder = '';
@@ -299,22 +295,13 @@ function renderStepContent() {
 
   const renderers = {
     'source': renderSourceStep,
-    'cast': renderCastStep,
     'stitch': renderStitchStep,
     'review': renderReviewStep,
     'extract_text': renderExtractStep,
-    'review2': renderReview2Step,
-    'clean': renderCleanStep,
-    'narrate': renderNarrateStep,
     'full_script': renderFullRecapScriptStep,
     'full_review': renderFullRecapReviewStep,
-    'tts': renderTTSStep,
-    'full_timeline': renderFullRecapTimelineStep,
     'full_video': renderFullRecapVideoStep,
     'full_package': renderFullRecapPackageStep,
-    'video': renderVideoStep,
-    'review_clips': renderReviewClipsStep,
-    'sort_clips': renderSortClipsStep,
   };
 
   const render = renderers[step.id];
@@ -1537,9 +1524,8 @@ function _batchStepsForMode() {
 
 function openWizardAtStep(projectName, stepId) {
   // Open the pipeline wizard on a specific step (used after full batch → Review Clips)
-  if (APP.mode !== 'dialogue' && APP.mode !== 'narrated' && APP.mode !== 'full_recap') APP.mode = 'dialogue';
-  APP.steps = APP.mode === 'full_recap' ? FULL_RECAP_STEPS
-    : (APP.mode === 'narrated' ? NARRATED_STEPS : DIALOGUE_STEPS);
+  APP.mode = 'full_recap';
+  APP.steps = FULL_RECAP_STEPS;
   APP.projectName = projectName;
   document.getElementById('viewHome').classList.add('hidden');
   document.getElementById('viewWizard').classList.remove('hidden');
@@ -1566,8 +1552,8 @@ async function _startFullBatch(payload) {
       return false;
     }
     APP.batchRunning = true;
-    if (!APP.mode) APP.mode = 'dialogue';
-    APP.steps = APP.mode === 'narrated' ? NARRATED_STEPS : DIALOGUE_STEPS;
+    APP.mode = 'full_recap';
+    APP.steps = FULL_RECAP_STEPS;
     APP.projectName = payload.project_name;
     showBatchOverlay(payload.project_name, payload.steps || _batchStepsForMode());
     // Jump to the stitch step so the user sees live context
