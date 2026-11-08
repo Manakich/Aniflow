@@ -394,7 +394,7 @@ def get_full_recap_package(project_name):
                 item['filename'] for item in list_reference_files(state.full_recap_workspace_dir or state.project_dir, 'titles')
             ],
             'settings': {
-                'openai_image_model': state.settings.get('openai_image_model', ''),
+                'openai_image_model': state.settings.get('openai_image_model', 'gpt-image-2'),
                 'full_recap_title_reference_text': state.settings.get('full_recap_title_reference_text', ''),
             },
         })
