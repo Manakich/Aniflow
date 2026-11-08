@@ -28,14 +28,11 @@ const APP = {
 
 // ─── Step Definitions ────────────────────────────────────
 const FULL_RECAP_STEPS = [
-  { id: 'source', label: 'Ссылка', title: 'Ссылка на мангу и главы', subtitle: 'Вставьте URL, выберите одну главу или диапазон глав' },
-  { id: 'stitch', label: 'Кадры', title: 'Штатная обработка AniFlow', subtitle: 'Один проход обнаружения и вырезания панелей через существующий Crop 2' },
-  { id: 'review', label: 'Проверка', title: 'Готовые панели', subtitle: 'Проверьте результат штатного извлечения изображений' },
-  { id: 'extract_text', label: 'Контекст', title: 'Текст и описания', subtitle: 'Используйте уже извлечённый OCR-текст и описания сцен' },
-  { id: 'full_script', label: 'Сценарий', title: 'Полный русский пересказ', subtitle: 'Сценарий в стиле выбранного профиля и заданного объёма' },
-  { id: 'full_review', label: 'Редактор', title: 'Проверка сценария', subtitle: 'Исправьте текст; длительность видео пересчитается автоматически' },
-  { id: 'full_video', label: 'Видео', title: 'Беззвучный видеоряд', subtitle: 'Нумерация всех готовых кадров и MP4 на 0,72 секунды на слово' },
-  { id: 'full_package', label: 'YouTube', title: 'Упаковка ролика', subtitle: 'Три превью, три названия, описание и закреплённый комментарий' },
+  { id: 'source', label: 'Ссылка', title: 'Ссылка на мангу или манхву', subtitle: 'Вставьте URL и выберите главу или диапазон глав' },
+  { id: 'prepare', label: 'Кадры', title: 'Подготовка изображений', subtitle: 'AniFlow автоматически использует штатное извлечение и готовые результаты Crop 2' },
+  { id: 'full_script', label: 'Сценарий', title: 'Оригинальный русский пересказ', subtitle: 'Создайте сценарий, отредактируйте его и сохраните' },
+  { id: 'full_video', label: 'Видео', title: 'Немое видео', subtitle: 'Кадры по порядку, длительность по количеству слов сценария' },
+  { id: 'full_package', label: 'YouTube', title: 'Оформление ролика', subtitle: 'Три превью, три названия, описание и закреплённый комментарий' },
 ];
 
 // ─── Init ────────────────────────────────────────────────
@@ -94,10 +91,11 @@ function renderProjects(projects) {
 }
 
 function resumeProject(name) {
-  // Resume an existing Full Recap project.
+  // Resume at preparation: all existing extraction stages are cache-aware
+  // and will reuse Crop 2/OCR results rather than processing the pages twice.
   APP.projectName = name;
   selectMode('full_recap');
-  APP.currentStep = 2; // jump to review
+  APP.currentStep = 1;
   renderWizard();
   loadProjectData(name);
 }
@@ -155,11 +153,8 @@ function renderStepContent() {
 
   const renderers = {
     'source': renderSourceStep,
-    'stitch': renderStitchStep,
-    'review': renderReviewStep,
-    'extract_text': renderExtractStep,
+    'prepare': renderFullRecapPrepareStep,
     'full_script': renderFullRecapScriptStep,
-    'full_review': renderFullRecapReviewStep,
     'full_video': renderFullRecapVideoStep,
     'full_package': renderFullRecapPackageStep,
   };
@@ -2478,36 +2473,69 @@ function renderFullRecapScriptPreview() {
   }
 }
 
+function renderFullRecapPrepareStep() {
+  const body = document.getElementById("stepBody");
+  body.innerHTML = `
+    <div class="settings-panel">
+      <div class="settings-panel-title">🖼️ Подготовка кадров и текстового контекста</div>
+      <p class="text-sm">Программа автоматически запустит штатные этапы AniFlow: извлечение чистых панелей Crop 2 и чтение текста из манги для точного пересказа.</p>
+      <p class="text-sm mt-2">Дополнительного вырезания поверх уже готовых кадров не будет. Если AniFlow ранее обработал главу, он использует сохранённые изображения и результаты распознавания.</p>
+      <div id="fullRecapPrepareSummary" class="text-xs text-dim mt-3">После подготовки здесь появится количество найденных кадров.</div>
+      <div class="progress-container hidden" id="fullRecapPrepareProgress">
+        <div class="progress-bar-wrap"><div class="progress-bar-fill" id="fullRecapPrepareProgressBar"></div></div>
+        <div class="progress-label"><span id="fullRecapPrepareProgressMsg">Подготовка…</span><span class="pct" id="fullRecapPrepareProgressPct">0%</span></div>
+      </div>
+    </div>`;
+
+  document.getElementById("stepActions").innerHTML = `
+    <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
+    <div class="step-actions-right">
+      <button class="btn btn-primary" onclick="runFullRecapPrepare()">Подготовить кадры и продолжить →</button>
+    </div>`;
+
+  loadProjectData(APP.projectName).then(() => {
+    const panels = APP.projectData?.panels || [];
+    const summary = document.getElementById("fullRecapPrepareSummary");
+    if (summary && panels.length) {
+      summary.textContent = `В проекте уже есть ${panels.length.toLocaleString("ru-RU")} готовых кадров. Повторное вырезание не требуется.`;
+    }
+  });
+}
+
+async function runFullRecapPrepare() {
+  await startFullRecapStep("full_recap_prepare");
+}
+
 function renderFullRecapScriptStep() {
   const body = document.getElementById("stepBody");
   body.innerHTML = `
     <div class="settings-panel">
       <div class="settings-panel-title">🧠 Параметры пересказа</div>
       <div class="form-group">
-        <label class="form-label">Текстовая модель</label>
+        <label class="form-label">Модель для написания сценария</label>
         <input class="form-input" id="fullRecapTextModel" value="qwen2.5:14b" placeholder="Ollama model или ID модели 9router">
-        <div class="text-xs text-dim mt-1">Сценарий создаётся по всем готовым кадрам и уже извлечённому контексту AniFlow. Дополнительного распознавания/вырезания изображений не будет.</div>
       </div>
       <div class="form-group">
-        <label class="form-label">Целевой объём сценария</label>
+        <label class="form-label">Целевой объём</label>
         <select id="fullRecapTargetWords" class="form-select">
-          <option value="5000" selected>5 000 слов — примерно 1 час</option>
-          <option value="7500">7 500 слов — примерно 1 час 30 минут</option>
-          <option value="10000">10 000 слов — примерно 2 часа</option>
+          <option value="5000" selected>5 000 слов — около 1 часа</option>
+          <option value="7500">7 500 слов — около 1 часа 30 минут</option>
+          <option value="10000">10 000 слов — около 2 часов</option>
         </select>
+        <div class="text-xs text-dim mt-1">Фактическая длительность видео рассчитывается после генерации по числу слов: 0,72 секунды на слово.</div>
       </div>
       <div class="form-group">
         <label class="form-label">Контекст истории (необязательно)</label>
-        <textarea id="fullRecapStoryContext" class="form-input" rows="3" placeholder="Правильные имена, предыстория, термины или важные пояснения..."></textarea>
+        <textarea id="fullRecapStoryContext" class="form-input" rows="3" placeholder="Правильные имена, предыстория, термины или важные пояснения…"></textarea>
       </div>
       <div class="settings-panel" style="background:var(--bg-secondary);">
-        <strong>Профиль повествования</strong>
-        <p class="text-sm mt-1">Подробный последовательный пересказ с эмоциональной подачей, живым разговорным языком, уместной иронией и объяснением способностей, системы, мотивов и последствий. Реплики манги не копируются дословно — сюжет пересказывается авторским текстом.</p>
+        <strong>Стиль пересказа уже настроен</strong>
+        <p class="text-sm mt-1">Подробное сюжетное повествование от третьего лица, энергичная разговорная подача, дозированная ирония и объяснение системы, способностей и последствий. Диалоги пересказываются своими словами. События и мотивы не выдумываются.</p>
       </div>
     </div>
     <div class="settings-panel">
-      <div class="settings-panel-title">📜 Сценарий</div>
-      <textarea id="fullRecapScriptPreview" class="form-input" rows="12" readonly placeholder="После генерации здесь появится полный пересказ..."></textarea>
+      <div class="settings-panel-title">📜 Полный сценарий</div>
+      <textarea id="fullRecapScriptEditor" class="form-input" rows="20" placeholder="Сначала нажмите «Создать пересказ». После генерации здесь можно редактировать весь текст."></textarea>
       <div id="fullRecapScriptMeta" class="text-xs text-dim mt-2">Сценарий ещё не создан.</div>
     </div>`;
 
@@ -2515,7 +2543,7 @@ function renderFullRecapScriptStep() {
     <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
     <div class="step-actions-right">
       <button class="btn btn-secondary" onclick="runFullRecapScript()">✍️ Создать пересказ</button>
-      <button class="btn btn-primary" onclick="nextStep()">Проверить сценарий →</button>
+      <button class="btn btn-primary" onclick="saveFullRecapScriptAndContinue()">Сохранить и к видео →</button>
     </div>`;
 
   loadFullRecapData().then(data => {
@@ -2530,6 +2558,22 @@ function renderFullRecapScriptStep() {
   });
 }
 
+function renderFullRecapScriptPreview() {
+  const el = document.getElementById("fullRecapScriptEditor");
+  if (!el) return;
+  const text = FULL_RECAP_DATA?.script || "";
+  // Do not replace text while the user is actively editing it.
+  if (document.activeElement !== el || !el.value.trim()) el.value = text;
+  const meta = document.getElementById("fullRecapScriptMeta");
+  if (meta) {
+    const words = Number(FULL_RECAP_DATA?.word_count || (text.match(/[A-Za-zА-Яа-яЁё0-9]+(?:[’'-][A-Za-zА-Яа-яЁё0-9]+)*/gu) || []).length);
+    const duration = Number(FULL_RECAP_DATA?.duration_seconds || words * 0.72);
+    meta.textContent = text
+      ? `${words.toLocaleString("ru-RU")} слов · расчётная длительность немого видео: ${formatRecapDuration(duration)}`
+      : "Сценарий ещё не создан.";
+  }
+}
+
 async function runFullRecapScript() {
   const settings = {
     pipeline_mode: "full_recap",
@@ -2540,44 +2584,13 @@ async function runFullRecapScript() {
   await startFullRecapStep("full_recap_script", settings);
 }
 
-function renderFullRecapReviewStep() {
-  const body = document.getElementById("stepBody");
-  body.innerHTML = `
-    <p class="text-sm text-dim mb-2">Проверьте и отредактируйте пересказ. После сохранения приложение пересчитает количество слов и длительность немого видео по формуле 0,72 секунды на слово.</p>
-    <div class="settings-panel">
-      <div class="settings-panel-title">📝 Полный сценарий для озвучки вручную</div>
-      <textarea id="fullRecapScriptEditor" class="form-input" rows="22" placeholder="Загружаю сценарий..."></textarea>
-      <div id="fullRecapEditMeta" class="text-xs text-dim mt-2"></div>
-    </div>`;
-
-  document.getElementById("stepActions").innerHTML = `
-    <button class="btn btn-ghost" onclick="prevStep()">← Назад</button>
-    <div class="step-actions-right">
-      <button class="btn btn-secondary" onclick="saveFullRecapScript()">💾 Сохранить сценарий</button>
-      <button class="btn btn-primary" onclick="nextStep()">К созданию видео →</button>
-    </div>`;
-
-  loadFullRecapData().then(data => {
-    const editor = document.getElementById("fullRecapScriptEditor");
-    if (editor) editor.value = data?.script || "";
-    const meta = document.getElementById("fullRecapEditMeta");
-    if (meta) meta.textContent = data?.script
-      ? `${Number(data.word_count || 0).toLocaleString("ru-RU")} слов · ${formatRecapDuration(data.duration_seconds || 0)}`
-      : "Сценарий пока не создан.";
-  });
-}
-
-function formatRecapDuration(seconds) {
-  const total = Math.max(0, Math.round(Number(seconds || 0)));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const secs = total % 60;
-  return `${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:${String(secs).padStart(2,"0")}`;
-}
 
 async function saveFullRecapScript() {
   const fullText = document.getElementById("fullRecapScriptEditor")?.value.trim() || "";
-  if (!fullText) return toast("Сценарий пустой.", "error");
+  if (!fullText) {
+    toast("Сначала создайте или вставьте сценарий.", "error");
+    return false;
+  }
   try {
     const response = await fetch(`/api/full-recap/${encodeURIComponent(APP.projectName)}/script`, {
       method: "PUT",
@@ -2587,12 +2600,21 @@ async function saveFullRecapScript() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Не удалось сохранить сценарий");
     await loadFullRecapData();
-    const meta = document.getElementById("fullRecapEditMeta");
-    if (meta) meta.textContent = `${Number(data.word_count || 0).toLocaleString("ru-RU")} слов · ${formatRecapDuration(data.duration_seconds || 0)}`;
+    const meta = document.getElementById("fullRecapScriptMeta");
+    if (meta) {
+      meta.textContent = `${Number(data.word_count || 0).toLocaleString("ru-RU")} слов · расчётная длительность немого видео: ${formatRecapDuration(data.duration_seconds || 0)}`;
+    }
     toast("Сценарий сохранён. Длительность видео пересчитана.", "success");
+    return true;
   } catch (error) {
     toast("Ошибка сохранения: " + error.message, "error");
+    return false;
   }
+}
+
+async function saveFullRecapScriptAndContinue() {
+  const saved = await saveFullRecapScript();
+  if (saved) nextStep();
 }
 
 function renderFullRecapVideoPreview() {
@@ -2957,6 +2979,10 @@ socket.on('step_complete', (data) => {
 
   if (String(data.step || '').startsWith('full_recap_')) {
     loadFullRecapData().then(() => {
+      if (data.step === 'full_recap_prepare') {
+        toast("Кадры и текстовый контекст готовы.", "success");
+        nextStep();
+      }
       if (data.step === 'full_recap_script') renderFullRecapScriptPreview();
       if (data.step === 'full_recap_video') renderFullRecapVideoPreview();
       if (data.step === 'full_recap_package') loadFullRecapPackageData().then(() => renderFullRecapPackagePreview());
@@ -3087,7 +3113,7 @@ function updateProgress(data) {
   const msg = data.message || 'Processing...';
 
   // Try to find the active progress bar
-  const prefixes = ['download', 'stitch', 'extract', 'fullRecap', 'fullVideo'];
+  const prefixes = ['download', 'stitch', 'extract', 'fullRecap', 'fullVideo', 'fullRecapPrepare'];
   for (const p of prefixes) {
     const bar = document.getElementById(`${p}ProgressBar`);
     const msgEl = document.getElementById(`${p}ProgressMsg`);
