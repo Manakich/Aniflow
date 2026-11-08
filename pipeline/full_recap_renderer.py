@@ -168,6 +168,69 @@ def render_silent_recap_video(
     }
 
 
+def add_youtube_package_to_export(
+    export_dir: str,
+    *,
+    titles: list[dict[str, Any]],
+    description: str,
+    pinned_comment: str,
+    selected_title: dict[str, Any] | None,
+    thumbnails: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Copy generated YouTube assets into the silent-video export folder."""
+    root = Path(export_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    thumbs_dir = root / "thumbnails"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+
+    copied = []
+    for item in thumbnails or []:
+        source = Path(str(item.get("path") or ""))
+        if not source.is_file():
+            continue
+        target = thumbs_dir / source.name
+        shutil.copy2(source, target)
+        copied.append(str(target))
+
+    package = {
+        "titles": titles or [],
+        "selected_title": selected_title,
+        "description": description or "",
+        "pinned_comment": pinned_comment or "",
+        "thumbnails": [
+            {
+                key: value for key, value in item.items()
+                if key not in {"path"}
+            }
+            for item in (thumbnails or [])
+        ],
+    }
+    (root / "youtube_package.json").write_text(
+        json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (root / "title_options.txt").write_text(
+        "\\n".join(
+            f"{index}. {item.get('title', '')}"
+            for index, item in enumerate(titles or [], start=1)
+        ) + "\\n",
+        encoding="utf-8",
+    )
+    (root / "description.txt").write_text(
+        (description or "").rstrip() + "\\n", encoding="utf-8"
+    )
+    (root / "pinned_comment.txt").write_text(
+        (pinned_comment or "").rstrip() + "\\n", encoding="utf-8"
+    )
+    return {
+        "package_json": str(root / "youtube_package.json"),
+        "titles_txt": str(root / "title_options.txt"),
+        "description_txt": str(root / "description.txt"),
+        "pinned_comment_txt": str(root / "pinned_comment.txt"),
+        "thumbnail_dir": str(thumbs_dir),
+        "copied_thumbnails": len(copied),
+    }
+
+
 def build_silent_recap_export(
     panels: list[dict[str, Any]],
     script_text: str,
