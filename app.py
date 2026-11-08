@@ -690,27 +690,16 @@ def run_step(step_name):
     project_name = data.get('project_name', '')
     step_map = {
         'load': lambda: _load_with_settings(project_name, data.get('source_folder', ''), data.get('settings', {})),
+        # Existing AniFlow image pipeline: use its Crop 2 output once.
         'stitch': lambda: orchestrator.step_stitch(PipelineState.load(project_name)),
-        'detect': lambda: orchestrator.step_detect_panels_yolo(PipelineState.load(project_name)),
         'detect1': lambda: orchestrator.step_detect_bubble_text(PipelineState.load(project_name)),
         'crop1': lambda: orchestrator.step_crop_bubble_text_panels(PipelineState.load(project_name)),
         'stitch2': lambda: orchestrator.step_stitch_bubble_panels(PipelineState.load(project_name)),
         'detect2': lambda: orchestrator.step_detect_art_panels(PipelineState.load(project_name)),
         'crop2': lambda: orchestrator.step_crop_art_panels(PipelineState.load(project_name)),
-        'crop': lambda: orchestrator.step_crop_extracted_panels(PipelineState.load(project_name)),
         'extract_text': lambda: orchestrator.step_extract_dialogue_text(PipelineState.load(project_name)),
         'extract_dialogue': lambda: orchestrator.step_extract_dialogue_text(PipelineState.load(project_name)),
-        'remove_text': lambda: orchestrator.step_remove_text_boxes(PipelineState.load(project_name)),
-        'narrate': lambda: orchestrator.step_narrate(PipelineState.load(project_name)),
-        'narrate_mapped': lambda: _run_with_settings(orchestrator.step_narrate_mapped, project_name, data),
-        'audio': lambda: _run_with_settings(orchestrator.step_generate_audio, project_name, data),
-        'video': lambda: _run_with_settings(orchestrator.step_compose_video, project_name, data),
-        # Scene Flow (YouTube-style)
-        'classify_panels': lambda: orchestrator.step_classify_panels(PipelineState.load(project_name)),
-        'narrate_scenes': lambda: _run_with_settings(orchestrator.step_narrate_scenes, project_name, data),
-        'scene_audio': lambda: _run_with_settings(orchestrator.step_generate_scene_audio, project_name, data),
-        'scene_clips': lambda: _run_with_settings(orchestrator.step_export_scene_clips, project_name, data),
-        # Full Recap Studio — one script, one audio file, visuals follow speech.
+        # Product-specific steps: Russian recap, silent MP4 and YouTube package.
         'full_recap_script': lambda: _run_with_settings(orchestrator.step_full_recap_script, project_name, data),
         'full_recap_video': lambda: _run_with_settings(orchestrator.step_full_recap_video, project_name, data),
         'full_recap_package': lambda: _run_with_settings(orchestrator.step_full_recap_package, project_name, data),
@@ -738,10 +727,6 @@ BATCH_STEP_FNS = {
     'detect2': 'step_detect_art_panels',
     'crop2': 'step_crop_art_panels',
     'extract_dialogue': 'step_extract_dialogue_text',
-    'remove_text': 'step_remove_text_boxes',
-    'narrate_mapped': 'step_narrate_mapped',
-    'audio': 'step_generate_audio',
-    'video': 'step_compose_video',
 }
 
 
