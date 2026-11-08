@@ -489,7 +489,7 @@ function collectSourceSettings() {
   };
 }
 
-// ─── ⚡ Pipeline settings sync (voices ↔ engine, bg color, pre-fill) ──────
+// ─── Pipeline settings sync (video background and project defaults) ──────
 function onBgModeChange(sel) {
   const custom = document.getElementById('bgCustomRow');
   const color = document.getElementById('bgColorRow');
@@ -1198,9 +1198,9 @@ function playDoneBeep() {
 
 
 const SPEED_BUILTINS = {
-  'builtin:low':      { clip_workers: 2, encoder: 'libx264',      edge_workers: 3, elevenlabs_workers: 1, kokoro_gpu: false },
-  'builtin:balanced': { clip_workers: 4, encoder: 'auto',         edge_workers: 6, elevenlabs_workers: 2, kokoro_gpu: true  },
-  'builtin:high':     { clip_workers: 8, encoder: 'videotoolbox', edge_workers: 8, elevenlabs_workers: 2, kokoro_gpu: true  },
+  'builtin:low':      { clip_workers: 2, encoder: 'libx264' },
+  'builtin:balanced': { clip_workers: 4, encoder: 'auto' },
+  'builtin:high':     { clip_workers: 8, encoder: 'videotoolbox' },
 };
 
 let _speedHardware = null; // cached /api/hardware response
@@ -1217,13 +1217,9 @@ function getSpeedSettings() {
     const v = parseInt(el.value, 10);
     return isNaN(v) ? dflt : Math.max(lo, Math.min(hi, v));
   };
-  const kEl = document.getElementById('speedKokoroGPU');
   return {
     clip_workers: num('speedClipWorkers', 1, 16, 4),
     encoder: (document.getElementById('speedEncoder') || {}).value || 'auto',
-    edge_workers: num('speedEdgeWorkers', 1, 12, 6),
-    elevenlabs_workers: num('speedELWorkers', 1, 4, 2),
-    kokoro_gpu: kEl ? kEl.checked : true,
   };
 }
 
@@ -1231,9 +1227,7 @@ function setSpeedSettings(s) {
   const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   setNum('speedClipWorkers', s.clip_workers);
   const enc = document.getElementById('speedEncoder'); if (enc) enc.value = s.encoder;
-  setNum('speedEdgeWorkers', s.edge_workers);
-  setNum('speedELWorkers', s.elevenlabs_workers);
-  const kEl = document.getElementById('speedKokoroGPU'); if (kEl) kEl.checked = !!s.kokoro_gpu;
+
 }
 
 function refreshSpeedPresetSelect(selected) {
@@ -1327,7 +1321,7 @@ function toggleSpeedOptions(cb) {
 function onSpeedModeToggle(cb) {
   // Remember the choice so it survives page reloads
   localStorage.setItem('speedMode', cb.checked ? 'true' : 'false');
-  toast(cb.checked ? '⚡ Speed Mode enabled — hardware encoder + parallel TTS/clips' : 'Speed Mode disabled — classic mode', 'info');
+  toast(cb.checked ? '⚡ Speed Mode enabled — hardware encoder + faster video processing' : 'Speed Mode disabled — classic mode', 'info');
 
   // If a project is already open, sync the setting into its saved state so
   // the next audio/video step picks it up immediately
