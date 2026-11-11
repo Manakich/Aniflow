@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Manga Recap — Secret Voicer Connector",
+  "version": "0.1.0",
+  "description": "Локальный диагностический коннектор для управления открытой страницей Secret Voicer.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_title": "Проверить Secret Voicer",
+    "default_popup": "popup.html"
+  }
+}
