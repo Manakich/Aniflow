@@ -53,7 +53,7 @@ Start-Process -FilePath $yandexExe -ArgumentList $arguments
 3. Verify that the local debugging endpoint is available:
 
 ~~~powershell
-Invoke-RestMethod http://127.0.0.1:9222/json/version | Format-List Browser,webSocketDebuggerUrl
+(Invoke-RestMethod http://127.0.0.1:9222/json/version).Browser
 ~~~
 
 4. Attach Playwright to the existing logged-in Yandex profile:
