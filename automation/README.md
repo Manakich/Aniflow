@@ -31,11 +31,17 @@ A separate persistent browser profile is created at automation/.local/chrome-pro
 
 The script saves a screenshot and a JSON description of visible controls under automation/.local. The JSON excludes cookies, local storage, passwords, and current form values. Check the screenshot for personal details before sharing it. Never share the chrome-profile folder.
 
-## Use Yandex Browser in an isolated automation profile
+## Use the existing signed-in Yandex Browser profile
 
-The Yandex mode now launches the installed Yandex Browser directly with a separate persistent profile under `automation/.local/yandex-profile`. It does not reuse your everyday `User Data\Default` profile, copy cookies, or require a remote-debugging port.
+The user's existing Yandex Browser profile is stored at:
 
-The default executable path is `C:/Program Files/Yandex/YandexBrowser/Application/browser.exe`. If Yandex is installed elsewhere, edit `YANDEX_EXECUTABLE` near the top of `automation/secret_voicer.py`.
+- Profile Path: `%LOCALAPPDATA%\\Yandex\\YandexBrowser\\User Data\\Default`
+- User Data directory: `%LOCALAPPDATA%\\Yandex\\YandexBrowser\\User Data`
+- Executable: `C:/Program Files/Yandex/YandexBrowser/Application/browser.exe`
+
+The `--browser yandex` mode launches the installed Yandex Browser through Playwright using the existing `User Data` folder and `--profile-directory=Default`. It does not copy cookies or create a separate profile. This is intended to reuse the already authenticated Secret Voicer session.
+
+**Before every run, fully exit all Yandex Browser windows and background processes.** Chromium-based browsers do not allow two processes to use the same User Data directory concurrently. Do not launch the script while your regular Yandex Browser is open.
 
 Run:
 
@@ -43,11 +49,11 @@ Run:
 python automation\\secret_voicer.py --browser yandex inspect
 ~~~
 
-On the first run, the new Yandex window will be unauthenticated. Sign into Secret Voicer manually in this automation window. Telegram may open its desktop app; complete the bot flow and check whether the original Secret Voicer tab in the automation window updates to the logged-in page. If Windows opens the final page in your everyday Yandex window instead, do not copy cookies or profile files. Report that behavior and use the screenshot/URL from the automation window; we will adjust the sign-in flow safely.
+The browser window launched by Playwright should show the existing session. The Telegram login link may still invoke the desktop Telegram app and return to the system-default Yandex process; because both use the same `User Data` folder, the returned session should be the one the automation uses. If it still redirects to login, stop and report the URL and screenshot; do not copy cookies or browser profile files manually.
 
-On later runs, the dedicated automation profile should retain its own Secret Voicer session. Keep `automation/.local/yandex-profile` private and never upload or send it.
+Playwright documents `launch_persistent_context` as using the supplied User Data directory for cookies and local storage, and warns that only one browser instance can use it at a time. The `executable_path` option runs the installed Yandex build rather than Playwright's bundled Chromium; compatibility with vendor builds is not guaranteed.
 
-Yandex is a Chromium-based browser, but Playwright does not guarantee full compatibility with every vendor-specific build. If the installed Yandex version fails to launch with Playwright, the isolated Playwright Chromium profile remains the fallback.
+Keep the profile directory private. It contains signed-in sessions and other personal browser data. Do not upload it or send it to anyone.
 
 ## Configure selectors
 
