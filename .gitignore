@@ -68,3 +68,9 @@ yt tutorial/
 # ─── Secrets ─────────────────────────────────────────
 .env
 SECURITY_AUDIT.txt
+
+
+# ─── Manga Recap Automation / Playwright local data ────────────
+automation/.local/
+automation/outputs/
+automation/selectors.json
