@@ -1,14 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Manga Recap — Secret Voicer Connector",
-  "version": "0.1.0",
-  "description": "Локальный диагностический коннектор для управления открытой страницей Secret Voicer.",
+  "version": "0.2.0",
+  "description": "Соединяет локальный Python-проект с открытой вкладкой Secret Voicer.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvzVtj9UjMYLi0pVeKeNa7XfYUr+fQ7C8LR2nNM4rZfm2hTFyGQrlk+mGSMd66ad7t33d7VWVZ97POJm3lhcAiQvb2S3/PhYtIR8HgamybNwHxncLBfPoNFpD69JtEOx5DSrrjcLXVNPhNHDRGYrxqjRGS+tZc0LWTLsjGrsSoCiPVps9xkdX5D60Ji1DhUlIE9+jths8cB3fwbA5kC1ffSog4qJqRougYZIHQGw+CMGwhRiJS5PPBMs85eT1mRuxbwITKDrJUkiJJwYRFqTi1182Z5sjNs3ZIfnK6iswTKd9+jbOx4i/zqcszKva290RjRzhpNmN0m3vyCQ+2GuT5QIDAQAB",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://secretvoicer.com/*",
+    "http://127.0.0.1/*"
   ],
   "action": {
-    "default_title": "Проверить Secret Voicer",
+    "default_title": "Manga Recap — Secret Voicer",
     "default_popup": "popup.html"
   }
 }
