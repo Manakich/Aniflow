@@ -1,89 +1,70 @@
-# Secret Voicer automation — first integration step
+# Manga Recap Automation — Secret Voicer
 
-This isolated Playwright module does not initialize AniFlow narration, TTS, or video-rendering pipelines.
+## Назначение
 
-## Install
+Модуль передаёт текстовый сценарий из Python в открытую вкладку Secret Voicer в Яндекс Браузере, запускает озвучку, скачивает новый MP3 и сохраняет его в `automation/outputs`.
 
-From the repository root, in Windows PowerShell:
+Вход в Secret Voicer остаётся обычным: каждый пользователь открывает свой Яндекс Браузер и входит через Telegram. Сессионные cookies, пароль и Telegram-код не копируются и не передаются программе.
 
-~~~powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r automation\requirements.txt
-~~~
+## Установка
 
-The default browser mode uses the locally installed Google Chrome. If Chrome is not installed:
+Работай из корня репозитория `Aniflow`.
 
-~~~powershell
-python -m playwright install chromium
-~~~
+1. Переключись на рабочую ветку и обнови её:
 
-Then pass --browser chromium to the commands below.
+```powershell
+git switch manga-recap-automation
+git pull origin manga-recap-automation
+```
 
-## First run: inspect the interface
+2. В Яндекс Браузере открой `browser://extensions`.
+3. Удали предыдущую версию Manga Recap Connector, если она уже установлена.
+4. Включи режим разработчика → «Загрузить распакованное расширение».
+5. Выбери папку `automation/extension` внутри репозитория.
+6. Открой `https://secretvoicer.com/app/` и войди через Telegram.
 
-~~~powershell
-python automation\secret_voicer.py inspect
-~~~
+**Важно:** в версии 0.2 закреплён идентификатор расширения. Загружай именно папку из этой ветки и не меняй поле `key` в `manifest.json`. У друга должна быть установлена эта же версия расширения.
 
-A separate persistent browser profile is created at automation/.local/chrome-profile. Sign in manually in the opened browser window (including any Telegram confirmation), open the audio-generation screen, and press Enter in the terminal.
+## Первый автоматический тест
 
-The script saves a screenshot and a JSON description of visible controls under automation/.local. The JSON excludes cookies, local storage, passwords, and current form values. Check the screenshot for personal details before sharing it. Never share the chrome-profile folder.
+В проекте есть короткий тестовый файл `automation/test_script.txt`.
 
-## Яндекс Браузер: работа через обычный профиль
+В PowerShell, из корня Aniflow, выполни:
 
-Не запускай `python automation\secret_voicer.py --browser yandex inspect`: этот режим специально отключён. Он открывает отдельный профиль, а Telegram-подтверждение у тебя возвращается в обычный Яндекс Браузер. Подключать обычный каталог `User Data` через Playwright тоже нельзя: Chromium блокирует remote debugging для стандартного профиля, а одновременное использование профиля вызывает блокировки файлов.
+```powershell
+python automation\\secret_voicer_bridge.py automation\\test_script.txt --name first_auto_test
+```
 
-Для Яндекс Браузера используется расширение, которое работает с уже открытой вкладкой Secret Voicer в обычном профиле:
+В терминале появится сообщение, что локальный мост запущен. Не закрывай окно PowerShell.
 
-1. Установи расширение из `automation/extension` по инструкции в `automation/extension/README.md`.
-2. Открой Secret Voicer и войди через Telegram.
-3. Нажми значок расширения и выполни проверку страницы.
-4. Передай полученный JSON для настройки точных элементов интерфейса.
+Затем:
 
-Пока расширение находится на диагностическом этапе: оно только считывает описания видимых элементов, не управляет генерацией и не скачивает MP3. Не передавай никому папку профиля, cookies, пароль или коды Telegram.
+1. Убедись, что в Яндекс Браузере открыта авторизованная вкладка Secret Voicer.
+2. Перед запуском выбери нужный голос и режим озвучки на сайте. Расширение сохраняет выбранные настройки, а не переключает их самостоятельно.
+3. Нажми значок Manga Recap — Secret Voicer.
+4. Выбери «Запустить задание из Python».
+5. Откроется вкладка прогресса. Не закрывай её и вкладку Secret Voicer до завершения.
 
-## Configure selectors
+После генерации расширение найдёт новую ссылку MP3, скачает аудио в папку загрузок браузера `MangaRecapAutomation`, а Python скопирует файл в:
 
-After inspecting the logged-in screen, copy selectors.example.json to selectors.json and fill in the CSS selectors. Each selector must match exactly one element.
+```text
+automation/outputs/first_auto_test.mp3
+```
 
-- script_input: text area or contenteditable script field.
-- generate_button: the control that starts generation.
-- download_button: the control that downloads completed audio.
-- completion: optional selector that appears only after generation finishes. If omitted, the script waits for the download control.
-- voice_select and voice_option: optional; only for a native HTML select. With a custom voice picker, choose the voice manually during the confirmation pause.
+Для каждого следующего сценария запускай новую команду, меняя входной TXT и имя выходного файла.
 
-Do not guess selectors. Verify them against the current page diagnostics.
+## Ограничения текущего этапа
 
-## Generate a test audio
+- Один сценарий на один запуск моста.
+- Максимум 100 000 символов в TXT.
+- Браузер и вкладка Secret Voicer должны оставаться открытыми.
+- Голос и режим озвучки выбираются на странице до запуска.
+- Сейчас автоматизирован именно этап TTS. Загрузка глав, генерация пересказа и сборка видео будут подключаться отдельно.
 
-Create a short UTF-8 file such as automation/test_script.txt and run:
+## Безопасность
 
-~~~powershell
-python automation\secret_voicer.py generate automation\test_script.txt --name first_test
-~~~
-
-The script inserts the text, pauses for a visual check of the voice/settings, clicks Generate, waits for completion, and saves the download under automation/outputs.
-
-The public Secret Voicer page advertises support for up to 100,000 characters in one submission. This module also rejects input longer than 100,000 characters.
-
-## Security
-
-- Do not commit .local, outputs, or selectors.json.
-- The browser uses a dedicated automation profile, not your everyday Chrome profile.
-- Never put Telegram codes, passwords, cookies, or browser storage in source code or GitHub.
-- This first version operates visible page controls only; it does not call undocumented/private service endpoints.
-
-
-## Автоматическая озвучка через Яндекс Браузер и Telegram
-
-Для автоматической генерации MP3 теперь используется локальный мост и расширение.
-
-1. Установи расширение по инструкции в `automation/extension/README.md`.
-2. Подготовь TXT со сценарием (до 100 000 символов).
-3. В корне проекта запусти `python automation\\secret_voicer_bridge.py automation\\test_script.txt --name first_auto_test`.
-4. На вкладке Secret Voicer нажми значок расширения и «Запустить задание из Python».
-5. Оставь вкладки открытыми до завершения. Готовый файл появится в `automation/outputs`.
-
-Мост слушает только `127.0.0.1`, принимает запросы от фиксированного ID расширения и не получает пароль, cookies или Telegram-код. Для каждого нового MP3 запускай отдельную команду.
+- Python слушает только локальный адрес `127.0.0.1`, а не всю сеть.
+- Сервер принимает запросы только от расширения с закреплённым ID.
+- Расширение не читает cookies, local storage, пароль или Telegram-коды.
+- Не отправляй другу папку профиля браузера. Ему достаточно установить программу и войти через Telegram самостоятельно.
+- Папки `.local` и `outputs` не добавляются в Git.
