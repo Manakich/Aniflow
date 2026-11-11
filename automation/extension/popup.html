@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Secret Voicer Connector</title>
+  <style>
+    body { width: 380px; margin: 0; padding: 14px; color: #202124; font: 13px/1.45 Arial, sans-serif; }
+    h1 { margin: 0 0 8px; font-size: 17px; }
+    p { margin: 7px 0; }
+    button { border: 0; border-radius: 7px; padding: 9px 12px; background: #222; color: white; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { min-height: 20px; color: #444; }
+    textarea { box-sizing: border-box; width: 100%; height: 260px; margin-top: 8px; padding: 8px; resize: vertical; font: 11px/1.4 Consolas, monospace; }
+    .note { color: #666; font-size: 11px; }
+    .actions { display: flex; gap: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Secret Voicer Connector</h1>
+  <p>Открой вкладку Secret Voicer и нажми «Проверить страницу».</p>
+  <div class="actions">
+    <button id="inspect">Проверить страницу</button>
+    <button id="copy" disabled>Скопировать JSON</button>
+  </div>
+  <p id="status" role="status">Готов к проверке.</p>
+  <textarea id="report" readonly spellcheck="false" placeholder="Здесь появится диагностика интерфейса."></textarea>
+  <p class="note">Расширение не читает cookies, пароли, local storage или текущие значения полей ввода. Перед отправкой отчёта всё равно просмотри его.</p>
+  <script src="popup.js"></script>
+</body>
+</html>
