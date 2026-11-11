@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manga Recap — выполнение озвучки</title>
+  <style>
+    body { max-width: 760px; margin: 38px auto; padding: 0 20px; color: #202124; font: 15px/1.55 Arial, sans-serif; }
+    h1 { font-size: 24px; }
+    #status { padding: 14px; border: 1px solid #ddd; border-radius: 8px; white-space: pre-wrap; }
+    #details { color: #555; font-size: 13px; }
+    #retry { display: none; margin-top: 14px; border: 0; border-radius: 7px; padding: 10px 15px; background: #222; color: white; cursor: pointer; }
+    code { background: #f2f2f2; padding: 2px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Manga Recap — генерация озвучки</h1>
+  <p id="status" role="status">Подключаюсь к локальному Python-мосту…</p>
+  <p id="details">Не закрывай эту вкладку и вкладку Secret Voicer до окончания скачивания.</p>
+  <button id="retry">Повторить проверку</button>
+  <script src="runner.js"></script>
+</body>
+</html>
