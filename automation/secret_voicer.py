@@ -118,13 +118,33 @@ def run_inspect(browser_name: str, timeout_ms: int) -> int:
         page = get_page(context)
         try:
             open_app(page, timeout_ms)
-            print("\nSecret Voicer открыт. Войди в аккаунт вручную, если требуется.")
-            input("Когда откроется рабочий экран генератора, нажми Enter здесь... ")
+            print("\\nSecret Voicer открыт в отдельном профиле Chromium.")
+            print("Важно: войти нужно именно в этом окне, а не в обычном Яндекс Браузере.")
+            print(
+                "Нажми «Войти через Telegram». Если Telegram откроется во внешнем "
+                "приложении и после подтверждения ссылка возврата откроется в Яндексе, "
+                "не отправляй эту ссылку никому: скопируй её локально и вставь в "
+                "адресную строку ЭТОГО окна Chromium."
+            )
+            input(
+                "Когда в Chromium откроется рабочая страница /app/ (не /login/), "
+                "нажми Enter здесь... "
+            )
             page.wait_for_timeout(1500)
+            authenticated = "/login/" not in page.url and "/login?" not in page.url
             json_path, screenshot_path = write_diagnostics(page)
-            print("\nДиагностика сохранена:")
+            print("\\nДиагностика сохранена:")
             print(f"  JSON: {json_path}")
             print(f"  Скриншот: {screenshot_path}")
+            if authenticated:
+                print("Страница уже не находится на маршруте входа.")
+            else:
+                print(
+                    "ВНИМАНИЕ: Chromium всё ещё показывает страницу входа. "
+                    "Сессия в этом профиле пока НЕ подтверждена. "
+                    "Не переходи к генерации — заверши Telegram-вход именно "
+                    "в Chromium и повтори inspect."
+                )
             print("Проверь скриншот на личные данные перед отправкой.")
         finally:
             context.close()
