@@ -59,7 +59,7 @@ inspectButton.addEventListener("click", async () => {
               role: element.getAttribute("role"),
               // Never read the live value or text from text-entry controls.
               text: isTextEntry ? "" :
-                (element.innerText || element.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 140),
+                (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 140),
               aria_label: element.getAttribute("aria-label"),
               placeholder: element.getAttribute("placeholder"),
               title: element.getAttribute("title"),
