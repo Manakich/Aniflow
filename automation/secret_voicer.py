@@ -118,7 +118,7 @@ def run_inspect(browser_name: str, timeout_ms: int) -> int:
         page = get_page(context)
         try:
             open_app(page, timeout_ms)
-            print("\\nSecret Voicer открыт в отдельном профиле Chromium.")
+            print("\nSecret Voicer открыт в отдельном профиле Chromium.")
             print("Важно: войти нужно именно в этом окне, а не в обычном Яндекс Браузере.")
             print(
                 "Нажми «Войти через Telegram». Если Telegram откроется во внешнем "
@@ -133,7 +133,7 @@ def run_inspect(browser_name: str, timeout_ms: int) -> int:
             page.wait_for_timeout(1500)
             authenticated = "/login/" not in page.url and "/login?" not in page.url
             json_path, screenshot_path = write_diagnostics(page)
-            print("\\nДиагностика сохранена:")
+            print("\nДиагностика сохранена:")
             print(f"  JSON: {json_path}")
             print(f"  Скриншот: {screenshot_path}")
             if authenticated:
