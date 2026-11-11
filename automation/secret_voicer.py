@@ -16,7 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent
 LOCAL_DIR = BASE_DIR / ".local"
 PROFILE_DIR = LOCAL_DIR / "chrome-profile"
 YANDEX_PROFILE_DIR = LOCAL_DIR / "yandex-profile"
-YANDEX_EXECUTABLE = Path(r"C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe")
+YANDEX_EXECUTABLE = Path("C:/Program Files/Yandex/YandexBrowser/Application/browser.exe")
 DOWNLOAD_DIR = BASE_DIR / "outputs"
 CONFIG_PATH = BASE_DIR / "selectors.json"
 
