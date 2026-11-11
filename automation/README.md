@@ -31,40 +31,23 @@ A separate persistent browser profile is created at automation/.local/chrome-pro
 
 The script saves a screenshot and a JSON description of visible controls under automation/.local. The JSON excludes cookies, local storage, passwords, and current form values. Check the screenshot for personal details before sharing it. Never share the chrome-profile folder.
 
-## Use your already signed-in Yandex Browser profile
+## Use Yandex Browser in an isolated automation profile
 
-The Yandex Browser paths reported by the user are:
+The Yandex mode now launches the installed Yandex Browser directly with a separate persistent profile under `automation/.local/yandex-profile`. It does not reuse your everyday `User Data\Default` profile, copy cookies, or require a remote-debugging port.
 
-- Executable: `C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe`
-- Profile: `%LOCALAPPDATA%\\Yandex\\YandexBrowser\\User Data\\Default`
+The default executable path is `C:/Program Files/Yandex/YandexBrowser/Application/browser.exe`. If Yandex is installed elsewhere, edit `YANDEX_EXECUTABLE` near the top of `automation/secret_voicer.py`.
 
-The User Data directory passed to Chromium is the parent folder (without `Default`). The script's `--browser yandex` mode attaches to Yandex over CDP at `127.0.0.1:9222`; it does not copy, export, or read cookies.
-
-1. Save any work and fully exit every Yandex Browser window. Also exit it from the tray/background menu. Do not kill it while it is writing profile data.
-2. In PowerShell, start Yandex with remote debugging enabled and the same existing profile:
+Run:
 
 ~~~powershell
-$yandexExe = 'C:\Program Files\Yandex\YandexBrowser\Application\browser.exe'
-$userData = Join-Path $env:LOCALAPPDATA 'Yandex\YandexBrowser\User Data'
-$arguments = '--remote-debugging-port=9222 --user-data-dir="' + $userData + '" --profile-directory=Default https://secretvoicer.com/app/'
-Start-Process -FilePath $yandexExe -ArgumentList $arguments
+python automation\\secret_voicer.py --browser yandex inspect
 ~~~
 
-3. Verify that the local debugging endpoint is available:
+On the first run, the new Yandex window will be unauthenticated. Sign into Secret Voicer manually in this automation window. Telegram may open its desktop app; complete the bot flow and check whether the original Secret Voicer tab in the automation window updates to the logged-in page. If Windows opens the final page in your everyday Yandex window instead, do not copy cookies or profile files. Report that behavior and use the screenshot/URL from the automation window; we will adjust the sign-in flow safely.
 
-~~~powershell
-(Invoke-RestMethod http://127.0.0.1:9222/json/version).Browser
-~~~
+On later runs, the dedicated automation profile should retain its own Secret Voicer session. Keep `automation/.local/yandex-profile` private and never upload or send it.
 
-4. Attach Playwright to the existing logged-in Yandex profile:
-
-~~~powershell
-python automation\secret_voicer.py --browser yandex inspect
-~~~
-
-The script disconnects its Playwright client when finished; it does not need to copy browser cookies into the project. After inspection, close Yandex normally to stop the local debugging endpoint.
-
-**Security:** the remote-debugging port gives local software control over the browser and access to signed-in tabs. Keep it bound to localhost (use the command above exactly; do not add a host `0.0.0.0`), do not share the CDP URL or browser profile, and fully exit the debug-enabled browser when automation is not being used. If the endpoint does not start, check the Yandex Browser policy named `RemoteDebuggingAllowed` or use the isolated Chromium profile route instead.
+Yandex is a Chromium-based browser, but Playwright does not guarantee full compatibility with every vendor-specific build. If the installed Yandex version fails to launch with Playwright, the isolated Playwright Chromium profile remains the fallback.
 
 ## Configure selectors
 
