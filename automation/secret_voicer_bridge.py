@@ -217,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("script", type=Path, help="UTF-8 TXT/MD файл со сценарием")
     parser.add_argument("--name", default="secretvoicer_audio", help="Имя MP3 в automation/outputs")
     parser.add_argument("--port", type=int, default=8765, help="Локальный порт (по умолчанию 8765)")
-    parser.add_argument("--timeout", type=int, default=900, help="Ожидание расширения в секундах (по умолчанию 900)")
+    parser.add_argument("--timeout", type=int, default=1800, help="Ожидание расширения в секундах (по умолчанию 1800)")
     return parser
 
 
