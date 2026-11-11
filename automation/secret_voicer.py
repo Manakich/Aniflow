@@ -48,6 +48,13 @@ def launch_context(playwright: Any, browser_name: str):
                 f"Яндекс Браузер не найден: {YANDEX_EXECUTABLE}. "
                 "Проверь путь установки в YANDEX_EXECUTABLE в secret_voicer.py."
             )
+        if not YANDEX_USER_DATA_DIR.is_dir() or not (YANDEX_USER_DATA_DIR / YANDEX_PROFILE_NAME).is_dir():
+            raise FileNotFoundError(
+                f"Существующий профиль Яндекса не найден: "
+                f"{YANDEX_USER_DATA_DIR / YANDEX_PROFILE_NAME}. "
+                "Откажусь создавать новый пустой профиль, чтобы не потерять "
+                "существующую авторизацию."
+            )
         kwargs["executable_path"] = str(YANDEX_EXECUTABLE)
         kwargs["args"] = [f"--profile-directory={YANDEX_PROFILE_NAME}"]
     try:
@@ -64,7 +71,7 @@ def launch_context(playwright: Any, browser_name: str):
 
 
 def connect_or_launch_context(playwright: Any, browser_name: str):
-    """Launch an isolated persistent browser profile for this automation."""
+    """Launch the selected persistent browser profile for this automation."""
     context = launch_context(playwright, browser_name)
     return context, context.close
 
