@@ -50,9 +50,32 @@ def launch_context(playwright: Any, browser_name: str):
         raise
 
 
+def connect_or_launch_context(playwright: Any, browser_name: str):
+    """Return (context, cleanup); Yandex connects over localhost CDP."""
+    if browser_name == "yandex":
+        endpoint = "http://127.0.0.1:9222"
+        try:
+            browser = playwright.chromium.connect_over_cdp(endpoint, timeout=10_000)
+        except Exception as exc:
+            raise RuntimeError(
+                "Не удалось подключиться к Яндекс Браузеру по CDP на 127.0.0.1:9222. "
+                "Сначала полностью закрой Яндекс Браузер, запусти его с "
+                "--remote-debugging-port=9222 по инструкции automation/README.md "
+                f"и повтори команду. Исходная ошибка: {exc}"
+            ) from exc
+        contexts = browser.contexts
+        if not contexts:
+            browser.close()
+            raise RuntimeError("Playwright не видит контекст Яндекс Браузера.")
+        return contexts[0], browser.close
+    context = launch_context(playwright, browser_name)
+    return context, context.close
+
 def get_page(context: Any):
-    pages = context.pages
-    return pages[0] if pages else context.new_page()
+    for page in reversed(context.pages):
+        if "secretvoicer.com" in page.url:
+            return page
+    return context.new_page()
 
 
 def inspect_page(page: Any) -> list[dict[str, Any]]:
@@ -114,7 +137,7 @@ def open_app(page: Any, timeout_ms: int) -> None:
 
 def run_inspect(browser_name: str, timeout_ms: int) -> int:
     with sync_playwright() as playwright:
-        context = launch_context(playwright, browser_name)
+        context, cleanup = connect_or_launch_context(playwright, browser_name)
         page = get_page(context)
         try:
             open_app(page, timeout_ms)
@@ -147,7 +170,7 @@ def run_inspect(browser_name: str, timeout_ms: int) -> int:
                 )
             print("Проверь скриншот на личные данные перед отправкой.")
         finally:
-            context.close()
+            cleanup()
     return 0
 
 
@@ -205,7 +228,7 @@ def run_generate(
         )
 
     with sync_playwright() as playwright:
-        context = launch_context(playwright, browser_name)
+        context, cleanup = connect_or_launch_context(playwright, browser_name)
         page = get_page(context)
         try:
             open_app(page, timeout_ms)
@@ -258,7 +281,7 @@ def run_generate(
                 print(f"Не удалось сохранить диагностику: {diagnostic_error}")
             raise
         finally:
-            context.close()
+            cleanup()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -266,8 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Локальная автоматизация Secret Voicer через Playwright."
     )
     parser.add_argument(
-        "--browser", choices=("chrome", "chromium"), default="chrome",
-        help="Отдельный профиль установленного Chrome или Chromium."
+        "--browser", choices=("chrome", "chromium", "yandex"), default="chrome",
+        help="Chrome/Chromium с отдельным профилем или Яндекс Браузер через CDP."
     )
     parser.add_argument(
         "--timeout", type=int, default=600_000,
