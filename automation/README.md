@@ -31,21 +31,18 @@ A separate persistent browser profile is created at automation/.local/chrome-pro
 
 The script saves a screenshot and a JSON description of visible controls under automation/.local. The JSON excludes cookies, local storage, passwords, and current form values. Check the screenshot for personal details before sharing it. Never share the chrome-profile folder.
 
-## Yandex Browser automation profile
+## Яндекс Браузер: работа через обычный профиль
 
-Yandex mode launches the installed Yandex Browser with a separate persistent profile under `automation/.local/yandex-profile`. It deliberately does not point Playwright at the ordinary `%LOCALAPPDATA%\\Yandex\\YandexBrowser\\User Data` directory.
+Не запускай `python automation\\secret_voicer.py --browser yandex inspect`: этот режим специально отключён. Он открывает отдельный профиль, а Telegram-подтверждение у тебя возвращается в обычный Яндекс Браузер. Подключать обычный каталог `User Data` через Playwright тоже нельзя: Chromium блокирует remote debugging для стандартного профиля, а одновременное использование профиля вызывает блокировки файлов.
 
-Why: recent Chromium security changes block Playwright's remote-debugging automation against the default browser data directory. Playwright documents that the regular profile should not be passed to `launch_persistent_context`; use a distinct user-data directory instead. Never copy the ordinary browser profile or cookies into the repository.
+Для Яндекс Браузера используется расширение, которое работает с уже открытой вкладкой Secret Voicer в обычном профиле:
 
-Run:
+1. Установи расширение из `automation/extension` по инструкции в `automation/extension/README.md`.
+2. Открой Secret Voicer и войди через Telegram.
+3. Нажми значок расширения и выполни проверку страницы.
+4. Передай полученный JSON для настройки точных элементов интерфейса.
 
-~~~powershell
-python automation\\secret_voicer.py --browser yandex inspect
-~~~
-
-On the first run the automation profile is empty and must be authenticated. The Secret Voicer login page offers Telegram, Google, and Yandex sign-in. Use an alternate provider only if it is already linked to the same Secret Voicer account/subscription. If the account is Telegram-only and Telegram's return always opens the everyday browser, stop: do not assume the new profile is authenticated. The next supported path is a small browser extension installed in the already signed-in Yandex profile that talks to a local Python bridge; this avoids remote-debugging the default profile.
-
-The browser process must not already be using `automation/.local/yandex-profile` when the script starts. The automation profile contains its own session and must remain private. It is ignored by Git.
+Пока расширение находится на диагностическом этапе: оно только считывает описания видимых элементов, не управляет генерацией и не скачивает MP3. Не передавай никому папку профиля, cookies, пароль или коды Telegram.
 
 ## Configure selectors
 
