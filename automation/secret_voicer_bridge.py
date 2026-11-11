@@ -64,6 +64,7 @@ def run_bridge(script_path: Path, output_name: str, port: int, timeout_seconds: 
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
             self.send_header("Access-Control-Max-Age", "600")
 
         def _json(self, status: int, payload: dict[str, Any]) -> None:
