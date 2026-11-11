@@ -15,8 +15,6 @@ APP_URL = "https://secretvoicer.com/app/"
 BASE_DIR = Path(__file__).resolve().parent
 LOCAL_DIR = BASE_DIR / ".local"
 PROFILE_DIR = LOCAL_DIR / "chrome-profile"
-YANDEX_PROFILE_DIR = LOCAL_DIR / "yandex-profile"
-YANDEX_EXECUTABLE = Path("C:/Program Files/Yandex/YandexBrowser/Application/browser.exe")
 DOWNLOAD_DIR = BASE_DIR / "outputs"
 CONFIG_PATH = BASE_DIR / "selectors.json"
 
@@ -34,7 +32,7 @@ def launch_context(playwright: Any, browser_name: str):
         )
     LOCAL_DIR.mkdir(parents=True, exist_ok=True)
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    profile_dir = YANDEX_PROFILE_DIR if browser_name == "yandex" else PROFILE_DIR
+    profile_dir = PROFILE_DIR
     kwargs: dict[str, Any] = {
         "user_data_dir": str(profile_dir),
         "headless": False,
@@ -45,13 +43,6 @@ def launch_context(playwright: Any, browser_name: str):
     }
     if browser_name == "chrome":
         kwargs["channel"] = "chrome"
-    elif browser_name == "yandex":
-        if not YANDEX_EXECUTABLE.is_file():
-            raise FileNotFoundError(
-                f"Яндекс Браузер не найден: {YANDEX_EXECUTABLE}. "
-                "Проверь путь установки в YANDEX_EXECUTABLE в secret_voicer.py."
-            )
-        kwargs["executable_path"] = str(YANDEX_EXECUTABLE)
     try:
         return playwright.chromium.launch_persistent_context(**kwargs)
     except Exception as exc:
