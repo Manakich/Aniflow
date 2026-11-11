@@ -74,3 +74,16 @@ The public Secret Voicer page advertises support for up to 100,000 characters in
 - The browser uses a dedicated automation profile, not your everyday Chrome profile.
 - Never put Telegram codes, passwords, cookies, or browser storage in source code or GitHub.
 - This first version operates visible page controls only; it does not call undocumented/private service endpoints.
+
+
+## Автоматическая озвучка через Яндекс Браузер и Telegram
+
+Для автоматической генерации MP3 теперь используется локальный мост и расширение.
+
+1. Установи расширение по инструкции в `automation/extension/README.md`.
+2. Подготовь TXT со сценарием (до 100 000 символов).
+3. В корне проекта запусти `python automation\\secret_voicer_bridge.py automation\\test_script.txt --name first_auto_test`.
+4. На вкладке Secret Voicer нажми значок расширения и «Запустить задание из Python».
+5. Оставь вкладки открытыми до завершения. Готовый файл появится в `automation/outputs`.
+
+Мост слушает только `127.0.0.1`, принимает запросы от фиксированного ID расширения и не получает пароль, cookies или Telegram-код. Для каждого нового MP3 запускай отдельную команду.
