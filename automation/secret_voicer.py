@@ -141,14 +141,12 @@ def run_inspect(browser_name: str, timeout_ms: int) -> int:
         page = get_page(context)
         try:
             open_app(page, timeout_ms)
-            print("\nSecret Voicer открыт в отдельном профиле Chromium.")
-            print("Важно: войти нужно именно в этом окне, а не в обычном Яндекс Браузере.")
-            print(
-                "Нажми «Войти через Telegram». Если Telegram откроется во внешнем "
-                "приложении и после подтверждения ссылка возврата откроется в Яндексе, "
-                "не отправляй эту ссылку никому: скопируй её локально и вставь в "
-                "адресную строку ЭТОГО окна Chromium."
-            )
+            if browser_name == "yandex":
+                print("\nPlaywright подключён к твоему Яндекс Браузеру.")
+                print("Используется уже сохранённая сессия профиля Default.")
+            else:
+                print("\nSecret Voicer открыт в отдельном профиле Chromium.")
+                print("Войди в аккаунт вручную именно в этом окне.")
             input(
                 "Когда в Chromium откроется рабочая страница /app/ (не /login/), "
                 "нажми Enter здесь... "
