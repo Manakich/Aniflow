@@ -1,0 +1,11 @@
+{
+  "url": "https://secretvoicer.com/app/",
+  "selectors": {
+    "script_input": "",
+    "voice_select": null,
+    "voice_option": null,
+    "generate_button": "",
+    "completion": null,
+    "download_button": ""
+  }
+}
