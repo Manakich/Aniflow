@@ -32,7 +32,7 @@ git pull origin manga-recap-automation
 В PowerShell, из корня Aniflow, выполни:
 
 ```powershell
-python automation\\secret_voicer_bridge.py automation\\test_script.txt --name first_auto_test
+python automation\secret_voicer_bridge.py automation\test_script.txt --name first_auto_test
 ```
 
 В терминале появится сообщение, что локальный мост запущен. Не закрывай окно PowerShell.
