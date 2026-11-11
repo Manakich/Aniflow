@@ -71,12 +71,52 @@ inspectButton.addEventListener("click", async () => {
             };
           });
 
+        const resultLinks = Array.from(document.querySelectorAll("a"))
+          .filter((link) => /скачать аудио/i.test((link.innerText || link.textContent || "").trim()))
+          .map((link) => {
+            let hrefKind = "none";
+            let hrefPath = null;
+            if (link.href) {
+              try {
+                const parsed = new URL(link.href);
+                hrefKind = parsed.protocol === "blob:" ? "blob" :
+                  parsed.origin === location.origin ? "same-origin" : "external";
+                // Do not expose query strings, fragments, signed URLs, or full download tokens.
+                hrefPath = parsed.pathname.split("/").map((part) =>
+                  /^[0-9a-f]{16,}$/i.test(part) || /^[0-9a-f-]{32,}$/i.test(part) ? "[redacted]" : part
+                ).join("/");
+              } catch {
+                hrefKind = "non-http";
+              }
+            }
+            return {
+              text: (link.innerText || link.textContent || "").trim().slice(0, 80),
+              visible: isVisible(link),
+              href_kind: hrefKind,
+              href_path: hrefPath,
+              download_attribute: link.getAttribute("download"),
+              class_name: String(link.className || "").slice(0, 160)
+            };
+          });
+
+        const media = Array.from(document.querySelectorAll("audio, video")).map((item) => ({
+          tag: item.tagName.toLowerCase(),
+          ready_state: item.readyState,
+          duration_seconds: Number.isFinite(item.duration) ? Math.round(item.duration * 100) / 100 : null,
+          paused: item.paused,
+          current_source_kind: !item.currentSrc ? "none" :
+            item.currentSrc.startsWith("blob:") ? "blob" :
+            item.currentSrc.startsWith(location.origin) ? "same-origin" : "external"
+        }));
+
         return {
           url: location.href,
           title: document.title,
           captured_at: new Date().toISOString(),
           interactive_elements: elements,
-          privacy_note: "No cookies, passwords, local storage, or live input values were read."
+          result_links: resultLinks,
+          media,
+          privacy_note: "No cookies, passwords, local storage, full download URLs, or live input values were read."
         };
       }
     });
