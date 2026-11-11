@@ -39,6 +39,7 @@ def launch_context(playwright: Any, browser_name: str):
         "accept_downloads": True,
         "downloads_path": str(DOWNLOAD_DIR),
         "no_viewport": True,
+        "chromium_sandbox": True,
     }
     if browser_name == "chrome":
         kwargs["channel"] = "chrome"
