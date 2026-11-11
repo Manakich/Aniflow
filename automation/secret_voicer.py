@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import json
 import re
 import sys
@@ -16,8 +15,7 @@ APP_URL = "https://secretvoicer.com/app/"
 BASE_DIR = Path(__file__).resolve().parent
 LOCAL_DIR = BASE_DIR / ".local"
 PROFILE_DIR = LOCAL_DIR / "chrome-profile"
-YANDEX_USER_DATA_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / "Yandex" / "YandexBrowser" / "User Data"
-YANDEX_PROFILE_NAME = "Default"
+YANDEX_PROFILE_DIR = LOCAL_DIR / "yandex-profile"
 YANDEX_EXECUTABLE = Path("C:/Program Files/Yandex/YandexBrowser/Application/browser.exe")
 DOWNLOAD_DIR = BASE_DIR / "outputs"
 CONFIG_PATH = BASE_DIR / "selectors.json"
@@ -32,7 +30,7 @@ def safe_name(value: str) -> str:
 def launch_context(playwright: Any, browser_name: str):
     LOCAL_DIR.mkdir(parents=True, exist_ok=True)
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    profile_dir = YANDEX_USER_DATA_DIR if browser_name == "yandex" else PROFILE_DIR
+    profile_dir = YANDEX_PROFILE_DIR if browser_name == "yandex" else PROFILE_DIR
     kwargs: dict[str, Any] = {
         "user_data_dir": str(profile_dir),
         "headless": False,
@@ -49,15 +47,7 @@ def launch_context(playwright: Any, browser_name: str):
                 f"Яндекс Браузер не найден: {YANDEX_EXECUTABLE}. "
                 "Проверь путь установки в YANDEX_EXECUTABLE в secret_voicer.py."
             )
-        if not YANDEX_USER_DATA_DIR.is_dir() or not (YANDEX_USER_DATA_DIR / YANDEX_PROFILE_NAME).is_dir():
-            raise FileNotFoundError(
-                f"Существующий профиль Яндекса не найден: "
-                f"{YANDEX_USER_DATA_DIR / YANDEX_PROFILE_NAME}. "
-                "Откажусь создавать новый пустой профиль, чтобы не потерять "
-                "существующую авторизацию."
-            )
         kwargs["executable_path"] = str(YANDEX_EXECUTABLE)
-        kwargs["args"] = [f"--profile-directory={YANDEX_PROFILE_NAME}"]
     try:
         return playwright.chromium.launch_persistent_context(**kwargs)
     except Exception as exc:
@@ -147,8 +137,8 @@ def run_inspect(browser_name: str, timeout_ms: int) -> int:
         try:
             open_app(page, timeout_ms)
             if browser_name == "yandex":
-                print("\nPlaywright запустил Яндекс Браузер с твоим существующим профилем Default.")
-                print("Используется текущая авторизация Secret Voicer; обычный Яндекс должен быть полностью закрыт перед запуском.")
+                print("\nPlaywright запустил отдельный профиль Яндекс Браузера для автоматизации.")
+                print("Это не твой обычный профиль Default. Авторизацию для этого профиля потребуется выполнить отдельно.")
             else:
                 print("\nSecret Voicer открыт в отдельном профиле Chromium.")
                 print("Войди в аккаунт вручную именно в этом окне.")
