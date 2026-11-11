@@ -60,7 +60,7 @@ function executePageJob(tabId, job) {
 
       submit.click();
       const startedAt = Date.now();
-      const timeoutMs = 12 * 60 * 1000;
+      const timeoutMs = 20 * 60 * 1000;
 
       while (Date.now() - startedAt < timeoutMs) {
         const candidates = Array.from(document.querySelectorAll("a.audio-download-btn"))
@@ -97,7 +97,7 @@ function executePageJob(tabId, job) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
-      throw new Error("За 12 минут не появилась новая ссылка MP3. Возможно, генерация не завершилась.");
+      throw new Error("За 20 минут не появилась новая ссылка MP3. Возможно, генерация не завершилась.");
     }
   });
 }
