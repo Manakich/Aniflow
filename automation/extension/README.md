@@ -19,7 +19,7 @@
 3. Из корня репозитория запусти в PowerShell:
 
 ```powershell
-python automation\\secret_voicer_bridge.py automation\\test_script.txt --name first_auto_test
+python automation\secret_voicer_bridge.py automation\test_script.txt --name first_auto_test
 ```
 
 4. Оставь Python-терминал открытым.
