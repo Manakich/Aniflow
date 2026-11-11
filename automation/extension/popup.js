@@ -58,7 +58,7 @@ inspectButton.addEventListener("click", async () => {
             element.getAttribute("role") === "textbox" || element.getAttribute("contenteditable") === "true";
           return {
             index, tag, type, role: element.getAttribute("role"),
-            text: isTextEntry ? "" : (element.innerText || element.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 140),
+            text: isTextEntry ? "" : (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 140),
             aria_label: element.getAttribute("aria-label"),
             placeholder: element.getAttribute("placeholder"),
             title: element.getAttribute("title"),
