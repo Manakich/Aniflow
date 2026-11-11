@@ -15,6 +15,8 @@ APP_URL = "https://secretvoicer.com/app/"
 BASE_DIR = Path(__file__).resolve().parent
 LOCAL_DIR = BASE_DIR / ".local"
 PROFILE_DIR = LOCAL_DIR / "chrome-profile"
+YANDEX_PROFILE_DIR = LOCAL_DIR / "yandex-profile"
+YANDEX_EXECUTABLE = Path(r"C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe")
 DOWNLOAD_DIR = BASE_DIR / "outputs"
 CONFIG_PATH = BASE_DIR / "selectors.json"
 
@@ -28,8 +30,9 @@ def safe_name(value: str) -> str:
 def launch_context(playwright: Any, browser_name: str):
     LOCAL_DIR.mkdir(parents=True, exist_ok=True)
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    profile_dir = YANDEX_PROFILE_DIR if browser_name == "yandex" else PROFILE_DIR
     kwargs: dict[str, Any] = {
-        "user_data_dir": str(PROFILE_DIR),
+        "user_data_dir": str(profile_dir),
         "headless": False,
         "accept_downloads": True,
         "downloads_path": str(DOWNLOAD_DIR),
@@ -37,6 +40,13 @@ def launch_context(playwright: Any, browser_name: str):
     }
     if browser_name == "chrome":
         kwargs["channel"] = "chrome"
+    elif browser_name == "yandex":
+        if not YANDEX_EXECUTABLE.is_file():
+            raise FileNotFoundError(
+                f"Яндекс Браузер не найден: {YANDEX_EXECUTABLE}. "
+                "Проверь путь установки в YANDEX_EXECUTABLE в secret_voicer.py."
+            )
+        kwargs["executable_path"] = str(YANDEX_EXECUTABLE)
     try:
         return playwright.chromium.launch_persistent_context(**kwargs)
     except Exception as exc:
@@ -51,23 +61,7 @@ def launch_context(playwright: Any, browser_name: str):
 
 
 def connect_or_launch_context(playwright: Any, browser_name: str):
-    """Return (context, cleanup); Yandex connects over localhost CDP."""
-    if browser_name == "yandex":
-        endpoint = "http://127.0.0.1:9222"
-        try:
-            browser = playwright.chromium.connect_over_cdp(endpoint, timeout=10_000)
-        except Exception as exc:
-            raise RuntimeError(
-                "Не удалось подключиться к Яндекс Браузеру по CDP на 127.0.0.1:9222. "
-                "Сначала полностью закрой Яндекс Браузер, запусти его с "
-                "--remote-debugging-port=9222 по инструкции automation/README.md "
-                f"и повтори команду. Исходная ошибка: {exc}"
-            ) from exc
-        contexts = browser.contexts
-        if not contexts:
-            browser.close()
-            raise RuntimeError("Playwright не видит контекст Яндекс Браузера.")
-        return contexts[0], browser.close
+    """Launch an isolated persistent browser profile for this automation."""
     context = launch_context(playwright, browser_name)
     return context, context.close
 
@@ -142,8 +136,8 @@ def run_inspect(browser_name: str, timeout_ms: int) -> int:
         try:
             open_app(page, timeout_ms)
             if browser_name == "yandex":
-                print("\nPlaywright подключён к твоему Яндекс Браузеру.")
-                print("Используется уже сохранённая сессия профиля Default.")
+                print("\nОткрыт отдельный профиль Яндекс Браузера для автоматизации.")
+                print("Это не твой обычный профиль Default. Войди в Secret Voicer в этом окне; сессия сохранится в профиле automation.")
             else:
                 print("\nSecret Voicer открыт в отдельном профиле Chromium.")
                 print("Войди в аккаунт вручную именно в этом окне.")
