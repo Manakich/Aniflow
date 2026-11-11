@@ -28,6 +28,10 @@ def safe_name(value: str) -> str:
 
 
 def launch_context(playwright: Any, browser_name: str):
+    if browser_name == "yandex":
+        raise RuntimeError(
+            "Режим Playwright для обычного профиля Яндекс Браузера отключён. Telegram-вход открывает подтверждение в обычном браузере, а отдельный профиль не разделяет сессию. Используй расширение automation/extension в уже авторизованном профиле Яндекс Браузера."
+        )
     LOCAL_DIR.mkdir(parents=True, exist_ok=True)
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     profile_dir = YANDEX_PROFILE_DIR if browser_name == "yandex" else PROFILE_DIR
@@ -282,7 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--browser", choices=("chrome", "chromium", "yandex"), default="chrome",
-        help="Chrome/Chromium с отдельным профилем или Яндекс Браузер через CDP."
+        help="Chrome/Chromium с отдельным профилем; для обычного профиля Яндекс Браузера используй расширение."
     )
     parser.add_argument(
         "--timeout", type=int, default=600_000,
